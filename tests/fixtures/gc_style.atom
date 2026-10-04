@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Invented content modelled on the structure of a Government of Canada
+     news Atom feed: department as author, categories, updated timestamp with
+     a -04:00 offset, and no published timestamp. -->
+<feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en-CA">
+  <title>Example Government News Centre</title>
+  <subtitle>Example Government News Centre</subtitle>
+  <updated>2026-10-03T09:02:48-04:00</updated>
+  <link href="http://localhost:8181/news?format=atom" rel="self"/>
+  <id>https://news.government.example/</id>
+  <entry>
+    <title>The Government announces funding for example food hubs</title>
+    <id>https://www.government.example/en/agriculture/news/2026/10/example-food-hubs.html</id>
+    <summary type="html">The Minister will announce investments that help local producers.</summary>
+    <author><name>Department of Example Agriculture</name></author>
+    <category term="news releases"/>
+    <category term="agriculture"/>
+    <updated>2026-10-03T09:02:48-04:00</updated>
+    <link href="https://www.government.example/en/agriculture/news/2026/10/example-food-hubs.html" rel="alternate"/>
+  </entry>
+  <entry>
+    <title>Media advisory: Minister to make an announcement</title>
+    <id>https://www.government.example/en/finance/news/2026/10/media-advisory.html</id>
+    <summary type="html">The Minister will make an announcement.</summary>
+    <author><name>Department of Example Finance</name></author>
+    <category term="media advisories"/>
+    <updated>2026-10-02T17:30:00-04:00</updated>
+    <link href="https://www.government.example/en/finance/news/2026/10/media-advisory.html" rel="alternate"/>
+  </entry>
+</feed>

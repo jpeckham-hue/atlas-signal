@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Invented content modelled on the structure of an EU Commission-style
+     press-release RSS feed: guid equals link, coded category, truncated
+     plain-text description. -->
+<rss version="2.0">
+  <channel>
+    <title>Press releases - RSS</title>
+    <link>https://press.commission.example/api/rss?language=en</link>
+    <description>Search={format=RSS,size=10}</description>
+    <language>en</language>
+    <item>
+      <title>Statement by the Commissioner on a fictional trade dialogue</title>
+      <link>https://press.commission.example/detail/en/statement_26_0001</link>
+      <description>Commission Statement Brussels, 02 Oct 2026 The dialogue concluded today with agreement on next steps for...</description>
+      <category>POLICY_AREA=TRADE</category>
+      <pubDate>Fri, 02 Oct 2026 15:38:58 GMT</pubDate>
+      <guid>https://press.commission.example/detail/en/statement_26_0001</guid>
+    </item>
+  </channel>
+</rss>

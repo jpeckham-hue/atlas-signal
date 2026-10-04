@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Invented content modelled on the structure of a CBC-style RSS feed:
+     dc:creator author, HTML description with an image, category,
+     cmp=rss tracking parameter, HTML entities. -->
+<rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0">
+  <channel>
+    <title><![CDATA[Example Public Network | Business News]]></title>
+    <description><![CDATA[FOR TESTING ONLY]]></description>
+    <link>https://www.network.example/news/business</link>
+    <language>en-ca</language>
+    <item>
+      <title><![CDATA[Grocers &amp; suppliers   agree on   new code]]></title>
+      <link>https://www.network.example/news/business/grocery-code-1.234567?cmp=rss</link>
+      <guid isPermaLink="false">1.234567</guid>
+      <pubDate>Fri, 02 Oct 2026 21:15:00 EDT</pubDate>
+      <dc:creator><![CDATA[Alex   Example,  Sam Sample]]></dc:creator>
+      <category>Business</category>
+      <category>News/Business</category>
+      <description><![CDATA[<img src='https://images.network.example/1.jpg' alt='A grocery aisle' width='620' height='349' title='A grocery aisle'/><p>Retailers and suppliers signed a voluntary code &mdash; the first of its kind.</p><p>It takes effect in <b>January</b>.</p>]]></description>
+    </item>
+  </channel>
+</rss>

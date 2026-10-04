@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Invented content modelled on the structure of a BBC-style RSS feed:
+     guid differs from link (#0 suffix), tracking parameters on links,
+     media:thumbnail, CDATA text, no author. -->
+<rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+  <channel>
+    <title><![CDATA[Example Broadcaster - Business]]></title>
+    <description><![CDATA[Example Broadcaster - Business]]></description>
+    <link>https://www.broadcaster.example/news/business</link>
+    <language>en-gb</language>
+    <item>
+      <title><![CDATA[Widget makers report record quarter]]></title>
+      <description><![CDATA[Output rose sharply as demand for widgets grew.]]></description>
+      <link>https://www.broadcaster.example/news/articles/abc123?at_medium=RSS&amp;at_campaign=rss</link>
+      <guid isPermaLink="false">https://www.broadcaster.example/news/articles/abc123#0</guid>
+      <pubDate>Sat, 03 Oct 2026 04:38:31 GMT</pubDate>
+      <media:thumbnail width="240" height="134" url="https://images.broadcaster.example/abc123.jpg"/>
+    </item>
+    <item>
+      <title><![CDATA[Central bank holds rates]]></title>
+      <description><![CDATA[Policymakers left borrowing costs unchanged.]]></description>
+      <link>https://www.broadcaster.example/news/articles/def456?at_medium=RSS&amp;at_campaign=rss</link>
+      <guid isPermaLink="false">https://www.broadcaster.example/news/articles/def456#0</guid>
+      <pubDate>Fri, 02 Oct 2026 18:05:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

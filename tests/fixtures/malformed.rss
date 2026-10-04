@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Invented feed that is not well-formed XML (bare ampersand, missing
+     closing tags) but still contains recoverable entries. -->
+<rss version="2.0">
+  <channel>
+    <title>Example malformed feed</title>
+    <item>
+      <title>Recoverable entry</title>
+      <link>https://broken.example/recoverable</link>
+      <pubDate>Fri, 02 Oct 2026 10:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Profits & losses</title>
+      <link>https://broken.example/second</link>
+    </item>

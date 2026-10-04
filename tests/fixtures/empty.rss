@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Invented, well-formed feed with no items. -->
+<rss version="2.0">
+  <channel>
+    <title>Example empty feed</title>
+    <link>https://empty.example/</link>
+    <description>No items yet</description>
+  </channel>
+</rss>

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Invented feed: entries with and without a usable URL. -->
+<rss version="2.0">
+  <channel>
+    <title>Example URL edge cases</title>
+    <link>https://edge.example/</link>
+    <item>
+      <title>Good entry</title>
+      <link>https://edge.example/good</link>
+      <pubDate>Fri, 02 Oct 2026 10:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>No link, non-URL guid</title>
+      <guid isPermaLink="false">item-0002</guid>
+    </item>
+    <item>
+      <title>No link and no guid</title>
+    </item>
+    <item>
+      <title>No link, http guid that is not marked as a permalink</title>
+      <guid isPermaLink="false">https://edge.example/from-guid?utm_source=rss</guid>
+    </item>
+    <item>
+      <title>Relative link</title>
+      <link>/relative/path</link>
+    </item>
+    <item>
+      <title>Another good entry</title>
+      <link>http://EDGE.example/other#comments</link>
+    </item>
+  </channel>
+</rss>
