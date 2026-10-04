@@ -1,0 +1,64 @@
+# --- Secrets and credentials (never commit) ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials*.json
+service-account*.json
+# Local-only folder for private/account/financial documents
+private/
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# --- Editors / IDEs ---
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Node ---
+node_modules/
+.npm/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- Build output ---
+dist/
+build/
+out/
+.next/
+coverage/
+
+# --- Temporary files and logs ---
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.bak
