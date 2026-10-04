@@ -1,0 +1,57 @@
+# Feed sources for Experiment A (feed-only collection).
+#
+# Each [[sources]] entry needs:
+#   id        stable identifier: lowercase letters, digits and single hyphens
+#   name      human-readable name
+#   publisher organisation that publishes the feed
+#   kind      "publisher" or "government"
+#   feed_url  absolute http(s) URL of the RSS/Atom feed, used exactly as written
+# Optional:
+#   enabled   true (default) or false
+#
+# Removing an entry does not delete it from the database; it is marked disabled.
+
+[[sources]]
+id = "bbc-business"
+name = "BBC Business"
+publisher = "BBC"
+kind = "publisher"
+feed_url = "https://feeds.bbci.co.uk/news/business/rss.xml"
+
+[[sources]]
+id = "cbc-business"
+name = "CBC Business"
+publisher = "CBC"
+kind = "publisher"
+feed_url = "https://www.cbc.ca/webfeed/rss/rss-business"
+
+[[sources]]
+id = "guardian-business"
+name = "Guardian Business"
+publisher = "The Guardian"
+kind = "publisher"
+feed_url = "https://www.theguardian.com/business/rss"
+
+# Overlaps with guardian-business; used to test recognising the same article
+# across two feeds.
+[[sources]]
+id = "guardian-economics"
+name = "Guardian Economics"
+publisher = "The Guardian"
+kind = "publisher"
+feed_url = "https://www.theguardian.com/business/economics/rss"
+
+[[sources]]
+id = "ec-press"
+name = "EU Commission press releases"
+publisher = "European Commission"
+kind = "government"
+feed_url = "https://ec.europa.eu/commission/presscorner/api/rss?language=en"
+
+# pick=50 widens the feed window from the default 20 entries.
+[[sources]]
+id = "gc-news"
+name = "Government of Canada news"
+publisher = "Government of Canada"
+kind = "government"
+feed_url = "https://api.io.canada.ca/io-server/gc/news/en/v2?sort=publishedDate&orderBy=desc&pick=50&format=atom"

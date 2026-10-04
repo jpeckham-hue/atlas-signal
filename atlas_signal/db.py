@@ -6,6 +6,7 @@ form ``YYYY-MM-DDTHH:MM:SSZ``; the schema enforces that shape.
 """
 
 import sqlite3
+from datetime import datetime, timezone
 from os import PathLike
 
 SCHEMA_VERSION = 1
@@ -125,6 +126,19 @@ CREATE TABLE entry_errors (
 
 class SchemaError(Exception):
     """The database is not one this version of Atlas Signal can use."""
+
+
+def utc_timestamp(moment: datetime | None = None) -> str:
+    """Format a moment (default: now) as ``YYYY-MM-DDTHH:MM:SSZ`` in UTC.
+
+    Fractional seconds are dropped. Raises ValueError for a naive datetime,
+    since its time zone would be a guess.
+    """
+    if moment is None:
+        moment = datetime.now(timezone.utc)
+    elif moment.tzinfo is None or moment.utcoffset() is None:
+        raise ValueError("timestamp must be timezone-aware")
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def connect(path: str | PathLike[str]) -> sqlite3.Connection:
