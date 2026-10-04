@@ -55,6 +55,9 @@ out/
 .next/
 coverage/
 
+# --- Local data (SQLite databases, collected output) ---
+data/
+
 # --- Temporary files and logs ---
 *.log
 logs/
