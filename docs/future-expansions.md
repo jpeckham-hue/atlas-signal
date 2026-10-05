@@ -264,6 +264,96 @@ is necessary.
   testing known/inferred/unknown validity, contradictory evidence and identifier
   changes.
 
+## Event resolution / cross-source story linking
+
+### Status
+
+Research findings and a possible future direction only, from a read-only
+literature and code review on 2026-10-05. Not accepted architecture or an
+implementation plan; nothing here is designed or implemented.
+
+### Concept
+
+Atlas appears to need an Event concept, but an Event should be treated as a
+revisable Atlas hypothesis, not as a clustering result or an unquestioned fact.
+
+- **Article / Sighting:** something a source published and Atlas observed.
+- **Event:** Atlas's provisional model of an underlying real-world occurrence.
+  Articles stay separate records; an Event links to them.
+
+Event resolution needs to distinguish at least:
+
+1. copied or syndicated versions of the same article;
+2. different articles independently reporting the same event;
+3. follow-up reporting on a developing event;
+4. different events involving the same entities or topic;
+5. background or analysis discussing an event;
+6. recurring events that look textually similar, such as earnings reports or
+   economic releases.
+
+Syndicated repetition must not automatically count as independent
+corroboration.
+
+Motivating example: in Experiment 001 Run 4, BBC and the Guardian published
+different articles about apparently the same BT/TalkTalk development about 17
+minutes apart, while the same run also contained a separate BT-related story.
+
+### Possible future direction
+
+`new article → cheap candidate retrieval → multi-signal comparison → tentative Event relationship → optional expensive judgment for ambiguous cases`
+
+- Useful signals from the research: URL/canonical identity, near-duplicate text,
+  title/summary similarity, entity overlap, temporal proximity,
+  action/predicate, numbers/amounts/periods, source and syndication
+  relationships, embeddings, and selective LLM judgment. No individual signal is
+  sufficient.
+- Scaling: streaming resolution should compare each new article with a bounded
+  candidate set, not every historical article, using temporal windows, blocking
+  (for example by entity or date) and approximate retrieval.
+- Revisability: later evidence may merge, split or reassign event
+  relationships. Merges and splits should not silently erase earlier reasoning.
+- Provenance: an Article→Event relationship should eventually be an assertion
+  carrying relationship type, confidence, evidence/signals,
+  method/model/version, assertion time, and revision/supersession information.
+
+### Atlas-specific limitation
+
+Atlas currently stores feed titles and summaries, not full article text. Most of
+the event-clustering systems researched use richer text, so it is unknown how
+accurately Atlas could resolve events from its deliberately thin Experiment 001
+evidence.
+
+### Reference work (not adopted)
+
+- Topic Detection and Tracking (TDT): event versus topic definitions, first-story
+  detection, story-link detection.
+- Streaming first-story detection using locality-sensitive hashing.
+- Priberam news clustering: streaming article-to-cluster scoring with time decay.
+- Story Forest: events grouped into evolving story trees.
+- USTORY: sliding-window story discovery with embeddings.
+- Benchmarks: WCEP (event clusters) and SemEval-2022 Task 8 (multi-dimensional
+  news similarity).
+
+### Open questions
+
+- How much can be resolved from title and summary alone.
+- What event granularity is appropriate.
+- How a tentative event becomes corroborated or confirmed.
+- How to tell syndication from independent corroboration.
+- How to determine event time when publisher timestamps are unstable.
+- What merge, split and revision should mean.
+- When embeddings or LLM judgment add enough value to justify their cost.
+- Whether a later Story/Thread layer connecting related Events would be useful.
+
+### Evidence/research needed
+
+- Hand-label about 50 Experiment 001 article pairs into the six relationship
+  types above.
+- Test a cheap streaming baseline using title/summary similarity, entity overlap
+  and a time window.
+- Test embeddings and/or LLM judgment on ambiguous cases only, and compare
+  accuracy and cost with the baseline.
+
 ## Template for new ideas
 
 ```
