@@ -4,7 +4,7 @@ Atlas Signal is an experimental news intelligence and event-tracking project.
 
 ## Status
 
-**Early experimental stage. No application functionality has been built yet.** The project uses Python and SQLite. Work has started on the first experiment, feed-based news collection; so far only an empty package scaffold exists.
+**Early experimental stage.** The project uses Python and SQLite. The only working feature is a manual `collect` command for the first experiment: it reads a fixed list of RSS/Atom feeds, stores the articles it finds, and recognises articles it has already seen. Event tracking, entity linking and market analysis do not exist yet.
 
 ## Long-term direction
 
@@ -43,3 +43,19 @@ Show the command-line help:
 ```
 .venv\Scripts\python.exe -m atlas_signal --help
 ```
+
+## Collecting feeds
+
+```
+.venv\Scripts\python.exe -m atlas_signal collect
+```
+
+Fetches each enabled feed in `config/sources.toml` once, one at a time, and stores articles and sightings in a local SQLite database. It respects robots.txt (including for redirects to another site), sends conditional requests where the feed supports them, and prints a one-line summary per source. Runs are manual; nothing is scheduled.
+
+Options:
+
+- `--db PATH`: database file (default `data/atlas_signal.sqlite3`; the `data/` folder is created if needed and is not tracked by Git).
+- `--sources PATH`: source config file (default `config/sources.toml`).
+- `--source ID`: collect only this source; repeat to select several.
+
+Exit codes: `0` all sources succeeded, `1` the run finished but at least one source failed or was blocked, `2` the run could not start or complete.
