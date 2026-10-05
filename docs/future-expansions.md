@@ -151,9 +151,11 @@ preserving:
 
 ### Status
 
-Research findings and a possible future direction only, from a read-only
-investigation of public identifier sources on 2026-10-05. Not accepted
-architecture; no schema is proposed and nothing is implemented.
+Research findings and a possible future direction only, from two read-only
+investigations on 2026-10-05: public identifier sources, and point-in-time
+(historical) identity around renames, ticker and venue changes, acquisitions
+and a spin-off. Not accepted architecture; no schema is proposed and nothing is
+implemented.
 
 ### Concept
 
@@ -176,17 +178,24 @@ is necessary.
 ### Examples found
 
 - **Shopify:** one security listed in Toronto and the US; the US venue changed
-  from NYSE to Nasdaq in 2025 without the ticker changing.
+  from NYSE to Nasdaq in 2025 without the ticker changing. Wikidata's listing
+  information is stale after the move.
 - **CN Rail:** one security, `CNR` in Toronto and `CNI` on NYSE.
 - **Loblaw / Loews:** ticker `L` is Loblaw in Canada and Loews Corp in the US.
 - **SAP:** the ordinary share and the ADR are different securities, although
   both trade as `SAP`.
 - **Alphabet:** two share classes (`GOOGL`, `GOOG`) under one entity.
-- **Meta:** `FB` became `META`, and `FB` has since been reused by another
-  instrument.
-- **Discover:** after its acquisition and delisting, current listing data no
-  longer shows its old listing; current data alone cannot reconstruct
-  historical identity.
+- **Meta:** the legal name changed in October 2021 but the ticker changed from
+  `FB` to `META` only in June 2022. Today's OpenFIGI resolves `FB` to an
+  unrelated ETF.
+- **Block:** changed tickers on NYSE (`SQ` → `XYZ`) and ASX (`SQ2` → `XYZ`) on
+  different days.
+- **Discover and Shaw:** after acquisition and delisting, some current sources
+  no longer show the old listings while others (Wikidata for Discover) still
+  show them as open-ended.
+- **GE:** a 2021 reverse split changed the ISIN while the ticker stayed `GE`.
+  "GE Aerospace" is a brand; the legal name in the sources tested is still
+  General Electric Company.
 - **NVIDIA:** `NVDA.TO` is a Canadian depositary receipt, not ordinary NVIDIA
   shares.
 - **Berkshire Hathaway:** one listing spelled `BRK.B`, `BRK-B` or `BRK/B`
@@ -196,12 +205,31 @@ is necessary.
 
 - Ticker symbols are not globally unique, permanent or sufficient identifiers.
 - Entity, security and listing identity must not be collapsed together.
-- Listing and provider-symbol mappings may need start and end dates;
-  historical point-in-time identity matters.
+- Point-in-time identity appears feasible for experiments, but usually by
+  reconstructing it from dated evidence (filings, issuer and exchange notices,
+  dated source records) rather than by querying a single historical database.
+- Current-state lookups can give wrong answers for historical events. An old
+  ticker should never be resolved solely through a current ticker lookup.
+- External identifiers (LEI, ISIN, FIGI, ticker) are evidence and attributes of
+  identity, not permanent Atlas identities; an ISIN can change across a
+  corporate action while the company and listing continue.
+- Ticker changes and venue changes are independent of each other, and legal
+  name and brand may differ.
+- Every important identity relationship, not only listings and provider
+  symbols, may eventually need temporal validity.
+- Historical identity needs to distinguish `valid_from` / `valid_to` from
+  `announced_at`, `source_recorded_at` and `fetched_at`; one change was found
+  with three different dates across sources.
+- Validity boundaries may be known, inferred or unknown, each with its own
+  precision and confidence. Contradictory source assertions should be preserved
+  rather than silently overwritten.
 - Parent/subsidiary relationships (for example Google LLC under Alphabet) are
   potentially useful later but do not need to be designed now.
 - No single free source tested is sufficient as Atlas's canonical identity
-  backbone; several would need to be combined, each with provenance.
+  backbone; several would need to be combined, each with provenance. Public
+  sources appear sufficient for hand-curated experiments, but reliable
+  point-in-time identity and corporate-action data at scale may eventually
+  require licensed reference data.
 - GLEIF (LEI) appears useful for legal entities.
 - OpenFIGI appears useful for securities and listings.
 - SEC EDGAR is useful for US company and lifecycle information (renames,
@@ -232,6 +260,9 @@ is necessary.
   provider symbol) for a small set of known companies.
 - A point-in-time test of corporate identity and listings around known renames,
   venue moves and delistings.
+- A small hand-curated "as of T" identity ledger for the historical cases above,
+  testing known/inferred/unknown validity, contradictory evidence and identifier
+  changes.
 
 ## Template for new ideas
 
