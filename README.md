@@ -17,7 +17,7 @@ The goal is a general-purpose system that can, over time:
 - connect events to relevant entities such as companies, industries, governments, and projects;
 - evaluate whether events have measurable market impacts.
 
-These are goals, not existing features.
+These are goals, not existing features. Ideas and research findings for possible future work are parked in [docs/future-expansions.md](docs/future-expansions.md).
 
 ## First experiment
 
