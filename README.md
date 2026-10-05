@@ -6,6 +6,8 @@ Atlas Signal is an experimental news intelligence and event-tracking project.
 
 **Early experimental stage.** The project uses Python and SQLite. The working features are two manual commands for the first experiment: `collect` reads a fixed list of RSS/Atom feeds, stores the articles it finds and recognises articles it has already seen; `report` summarizes what has been collected. Event tracking, entity linking and market analysis do not exist yet.
 
+Experiment 001 (feed collection and identity) is described in [docs/experiments/001-feed-collection.md](docs/experiments/001-feed-collection.md).
+
 ## Long-term direction
 
 The goal is a general-purpose system that can, over time:
