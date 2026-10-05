@@ -354,6 +354,9 @@ evidence.
 - Test embeddings and/or LLM judgment on ambiguous cases only, and compare
   accuracy and cost with the baseline.
 
+Results of two labelling and review passes are recorded in
+[research/event-relationship-evaluation.md](research/event-relationship-evaluation.md).
+
 ## Template for new ideas
 
 ```
