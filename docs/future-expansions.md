@@ -147,6 +147,92 @@ preserving:
 - A method for abnormal-return measurement against a benchmark, tested on known
   historical events.
 
+## Entity / security / listing resolution
+
+### Status
+
+Research findings and a possible future direction only, from a read-only
+investigation of public identifier sources on 2026-10-05. Not accepted
+architecture; no schema is proposed and nothing is implemented.
+
+### Concept
+
+Connecting news to markets needs a chain of distinct identities:
+
+`Mention → Entity → Security → Listing → ProviderSymbol`
+
+- **Mention:** a textual reference in an article ("Nvidia Corp.", "NVDA") that
+  needs a resolution decision.
+- **Entity:** the legal/company identity.
+- **Security:** a particular instrument issued by, or representing, that entity:
+  a share class, ADR or CDR.
+- **Listing:** that security traded on a particular venue in a particular
+  currency, with validity dates.
+- **ProviderSymbol:** a data provider's representation of that listing.
+
+Testing against ten real companies showed that every one of these distinctions
+is necessary.
+
+### Examples found
+
+- **Shopify:** one security listed in Toronto and the US; the US venue changed
+  from NYSE to Nasdaq in 2025 without the ticker changing.
+- **CN Rail:** one security, `CNR` in Toronto and `CNI` on NYSE.
+- **Loblaw / Loews:** ticker `L` is Loblaw in Canada and Loews Corp in the US.
+- **SAP:** the ordinary share and the ADR are different securities, although
+  both trade as `SAP`.
+- **Alphabet:** two share classes (`GOOGL`, `GOOG`) under one entity.
+- **Meta:** `FB` became `META`, and `FB` has since been reused by another
+  instrument.
+- **Discover:** after its acquisition and delisting, current listing data no
+  longer shows its old listing; current data alone cannot reconstruct
+  historical identity.
+- **NVIDIA:** `NVDA.TO` is a Canadian depositary receipt, not ordinary NVIDIA
+  shares.
+- **Berkshire Hathaway:** one listing spelled `BRK.B`, `BRK-B` or `BRK/B`
+  depending on the provider.
+
+### Research conclusions
+
+- Ticker symbols are not globally unique, permanent or sufficient identifiers.
+- Entity, security and listing identity must not be collapsed together.
+- Listing and provider-symbol mappings may need start and end dates;
+  historical point-in-time identity matters.
+- Parent/subsidiary relationships (for example Google LLC under Alphabet) are
+  potentially useful later but do not need to be designed now.
+- No single free source tested is sufficient as Atlas's canonical identity
+  backbone; several would need to be combined, each with provenance.
+- GLEIF (LEI) appears useful for legal entities.
+- OpenFIGI appears useful for securities and listings.
+- SEC EDGAR is useful for US company and lifecycle information (renames,
+  delistings).
+- ISO MIC codes should be preferred for Atlas's exchange identity; providers use
+  their own exchange codes.
+- Wikidata may be useful for aliases and cross-links but must not be treated as
+  authoritative; stale and incorrect entries were found.
+- FinanceDatabase may be a rough research hint, but it showed enough identifier
+  errors that it should not be trusted as an authoritative source.
+- Mention resolution should record its method, confidence and provenance rather
+  than silently asserting identity.
+
+### Open questions
+
+- How to obtain point-in-time ticker and listing history.
+- How to choose between primary and cross-listed securities for a given event.
+- How to represent ADR, CDR and ordinary-share relationships.
+- How to tell a company from a product, brand or subsidiary with a similar name.
+- How to handle identifier lifecycle: lapsed, retired or duplicate identifiers.
+- Which source takes precedence when authoritative sources disagree.
+- What confidence thresholds should trigger human review.
+
+### Evidence/research needed
+
+- A mention-resolution test using real organisation names from Experiment 001.
+- A cross-source identity consistency test (LEI → ISIN → FIGI → listing →
+  provider symbol) for a small set of known companies.
+- A point-in-time test of corporate identity and listings around known renames,
+  venue moves and delistings.
+
 ## Template for new ideas
 
 ```
