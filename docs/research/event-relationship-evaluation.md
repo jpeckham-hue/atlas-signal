@@ -189,6 +189,21 @@ rather than another event-to-event relationship type. It is recorded as an
 evidence-supported future concept and is **explicitly out of scope for the first
 implementation experiment**.
 
+## Structured gold encoding
+
+Jeff's Pass 1 and Pass 2 judgments are preserved as structured data in
+[event-relationship-gold.json](event-relationship-gold.json): article IDs, event
+IDs, membership roles, event relations with their basis, and one label per
+judged article pair, with `unresolved` and `not_scored` kept as-is. Pass 1's
+article IDs and Jeff's Pass 1 judgments were not previously committed; they are
+recorded there.
+
+The structure is Claude's interpretation of Jeff's natural-language judgments.
+Jeff reviewed it and approved it, with explicit corrections, on 2026-10-05. It
+holds 68 pair labels (15 from Pass 1, 53 from Pass 2), and only Jeff's
+judgments: Claude's labels are not part of it. Its limitations are listed in the
+file itself.
+
 ## Recommended next step
 
 A small, scratch-only baseline, using stored feed evidence only, that:

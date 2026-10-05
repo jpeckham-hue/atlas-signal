@@ -1,0 +1,536 @@
+{
+  "format": "atlas-signal/event-relationship-gold",
+  "format_version": 1,
+  "title": "Jeff-approved structured gold encoding of event-relationship review Passes 1 and 2",
+  "approval": {
+    "approved_by": "Jeff",
+    "approved_on": "2026-10-05",
+    "statement": "Structured interpretation of Jeff's natural-language judgments, drafted by Claude and approved by Jeff with explicit corrections. This is the authoritative gold for Passes 1 and 2."
+  },
+  "source_record": "docs/research/event-relationship-evaluation.md",
+  "corpus": {
+    "database": "data/experiment-001.sqlite3 (local, not tracked by Git)",
+    "state": "Experiment 001 as of Run 4: 4 runs, 24 fetches, 177 articles, 620 sightings, 0 entry errors",
+    "sha256_at_encoding": "5bb7742f07dfcc495cb050414ae6c7a74b0f546e8578b9aff9c89ccfbe689dfd",
+    "note": "Article IDs refer to this database. It was not yet frozen when this file was written; Experiment 001 may continue to add articles, but existing article IDs and their stored title/summary fields do not change."
+  },
+  "conventions": {
+    "content": "Article IDs, event IDs and structured relationships only. Event labels are short neutral descriptions written for this file; no publisher text, summaries or packet contents are included.",
+    "event_ids": "Global across items and passes so the same real event links up. IDs are not contiguous.",
+    "membership_roles": ["reports", "discusses", "anticipates"],
+    "membership_status": {
+      "accepted": "Article belongs to the event with the given role.",
+      "unresolved": "Membership is plausible but not established by the reviewer's judgment; role is null.",
+      "not_scored": "Reviewer's judgment does not support a scorable membership or role."
+    },
+    "document_type_note": "Backgrounders use role 'discusses'; document type is separate metadata, not a role.",
+    "event_relation_types": ["part_of", "follows_from"],
+    "follows_from_basis": {
+      "publisher_stated": "The link is stated in the publisher's wording.",
+      "atlas_inferred": "The link would be inferred by Atlas; not used by any accepted relation in this file.",
+      "unspecified": "The reviewer accepted the link but did not state a basis; do not reclassify."
+    },
+    "event_relation_scope": {
+      "article_scorable": "Relation connects events with accepted article memberships.",
+      "event_level_only": "Relation is the reviewer's event-level judgment; its article mappings are unresolved, so it must not be used as article-level gold."
+    },
+    "pair_labels": {
+      "copy_of": "The two articles are copies/republications of the same content.",
+      "same_event": "The two articles share at least one accepted event membership.",
+      "linked": "Different events connected by an accepted part_of or follows_from relation (listed in 'via').",
+      "distinct": "Not the same event and not linked; 'reason' gives the cause of confusion.",
+      "unresolved": "The relationship is not established by stored evidence; do not score a confident assignment as correct unless listed in 'alt_ok'.",
+      "not_scored": "The reviewer's judgment is story-level or insufficiently precise for a pairwise assertion; exclude from scoring."
+    },
+    "pair_fields": {
+      "alt_ok": "Alternative labels explicitly approved as acceptable.",
+      "constraint": "'not_same_event' means merging the pair counts as a false merge even though the label is unresolved.",
+      "also_linked_via": "The pair also has an accepted event relation in addition to its primary label."
+    },
+    "story_notes": "Broader Story/Thread judgments are recorded as notes only. They are never event relations and are out of scope for the first implementation experiment."
+  },
+  "limitations": [
+    "Pass 1 (Review Pairs A-O): Claude's labels were sealed before Jeff's blind review, but the earlier Pass 0 report had shown those labels, so the reviewer may not have been fully blind. Claude's labels are not part of this gold.",
+    "Pass 2 (Items 1-25): no blinded Claude answer key was recorded. Items were selected by Claude with category targets in mind, and the reviewer had seen many of the articles before. Some categories are thin: one copy_of example, one advisory with a matching announcement, few follows_from cases.",
+    "Both passes use the same Experiment 001 data that any baseline would be designed against, so this gold is not a held-out test set. A held-out evaluation needs new articles labelled after the baseline rules are fixed.",
+    "This structure is an interpretation of natural-language judgments. Where the wording was story-level or imprecise, pairs are not_scored or unresolved rather than strengthened.",
+    "Pass 0 (56 pairs labelled by Claude only) is excluded."
+  ],
+  "events": [
+    {"id": "ev01", "label": "Manchester City verdict / financial scandal"},
+    {"id": "ev02", "label": "UAE warning about UK investments"},
+    {"id": "ev03", "label": "Call for HMRC scrutiny of the Manchester City case"},
+    {"id": "ev04", "label": "PEI tariff-response business funding announcement"},
+    {"id": "ev05", "label": "BT-TalkTalk rescue deal"},
+    {"id": "ev06", "label": "BT broadband-pause controversy"},
+    {"id": "ev07", "label": "G7 oil and diesel reserve-release decision"},
+    {"id": "ev08", "label": "UK average diesel price reaches 2 pounds per litre"},
+    {"id": "ev09", "label": "Canada's participation in the G20 Trade Ministers' Meeting"},
+    {"id": "ev10", "label": "Canada-EU trade bilateral at the G20 Trade Ministers' Meeting"},
+    {"id": "ev11", "label": "Household energy bill forecast for January"},
+    {"id": "ev13", "label": "Northern Ireland energy price increases"},
+    {"id": "ev14", "label": "Energy UK call for government action on bills"},
+    {"id": "ev15", "label": "Federal Reserve watchdog report on renovation costs"},
+    {"id": "ev16", "label": "DoJ declines to reopen investigation into former Fed chair"},
+    {"id": "ev17", "label": "Productivity Mega Deduction promotion, Newfoundland and Labrador"},
+    {"id": "ev18", "label": "Productivity Mega Deduction promotion, Brantford"},
+    {"id": "ev19", "label": "Productivity Mega Deduction promotion, Charlottetown"},
+    {"id": "ev20", "label": "US September jobs report"},
+    {"id": "ev21", "label": "Nasdaq record high reported as reaction to the jobs report"},
+    {"id": "ev22", "label": "OpenAI dismissals over sensitive information"},
+    {"id": "ev23", "label": "OpenAI safety leader resignation"},
+    {"id": "ev24", "label": "PEI prescription-drug funding announcement"},
+    {"id": "ev25", "label": "Conference on returning Ukrainian children concludes"},
+    {"id": "ev26", "label": "Conservative pledge to scrap environmental regulators"},
+    {"id": "ev27", "label": "Conservative plans for further spending cuts (leak)"},
+    {"id": "ev28", "label": "Diesel price crisis"},
+    {"id": "ev29", "label": "Threatened US diesel export ban"},
+    {"id": "ev30", "label": "US pressure on Europe to release diesel reserves"},
+    {"id": "ev31", "label": "NWT healthcare announcement (anticipated)"},
+    {"id": "ev32", "label": "Canada-EU Summit (anticipated)"},
+    {"id": "ev33", "label": "Inmate death, Joyceville Institution"},
+    {"id": "ev34", "label": "Inmate death, Grand Valley Institution"},
+    {"id": "ev35", "label": "Agriculture minister's New Brunswick and PEI tour"},
+    {"id": "ev36", "label": "Home energy retrofit financing announcement"},
+    {"id": "ev37", "label": "Andy Burnham's conference speech and plans"},
+    {"id": "ev38", "label": "Von der Leyen statement with North Macedonia's prime minister"},
+    {"id": "ev39", "label": "Von der Leyen statement with Montenegro's prime minister"},
+    {"id": "ev41", "label": "Bulgarian state aid for farmers approved"},
+    {"id": "ev42", "label": "Diesel cost impact on US Midwest farmers"},
+    {"id": "ev43", "label": "EC-Ukraine joint statement on budget and defence needs"},
+    {"id": "ev44", "label": "2.9 billion euro Ukraine Facility disbursement"},
+    {"id": "ev48", "label": "US inflation report"},
+    {"id": "ev49", "label": "US borrowing costs high amid bond sell-off"},
+    {"id": "ev50", "label": "UK growth and household income revised upwards"},
+    {"id": "ev51", "label": "Greggs restructuring"},
+    {"id": "ev52", "label": "FedNor Northern Ontario funding announcement"},
+    {"id": "ev53", "label": "Canada-India trade bilateral at the G20 Trade Ministers' Meeting"},
+    {"id": "ev54", "label": "Canada-France trade bilateral at the G20 Trade Ministers' Meeting"}
+  ],
+  "event_relations": [
+    {"id": "r01", "type": "follows_from", "from": "ev02", "to": "ev01", "basis": "publisher_stated", "status": "accepted", "scope": "article_scorable", "sources": ["P1-A", "P2-25"]},
+    {"id": "r02", "type": "follows_from", "from": "ev03", "to": "ev01", "basis": "unspecified", "status": "accepted", "scope": "article_scorable", "sources": ["P1-A"]},
+    {"id": "r03", "type": "part_of", "from": "ev10", "to": "ev09", "basis": null, "status": "accepted", "scope": "article_scorable", "sources": ["P1-G"]},
+    {"id": "r04", "type": "follows_from", "from": "ev16", "to": "ev15", "basis": "unspecified", "status": "accepted", "scope": "article_scorable", "sources": ["P1-J"]},
+    {"id": "r05", "type": "follows_from", "from": "ev21", "to": "ev20", "basis": "publisher_stated", "status": "accepted", "scope": "article_scorable", "sources": ["P1-L", "P2-15"]},
+    {"id": "r06", "type": "follows_from", "from": "ev29", "to": "ev28", "basis": "unspecified", "status": "accepted", "scope": "event_level_only", "sources": ["P2-03"]},
+    {"id": "r07", "type": "follows_from", "from": "ev30", "to": "ev29", "basis": "unspecified", "status": "accepted", "scope": "event_level_only", "sources": ["P2-03"]},
+    {"id": "r08", "type": "follows_from", "from": "ev07", "to": "ev30", "basis": "unspecified", "status": "accepted", "scope": "event_level_only", "sources": ["P2-03"]},
+    {"id": "r09", "type": "part_of", "from": "ev53", "to": "ev09", "basis": null, "status": "accepted", "scope": "article_scorable", "sources": ["P2-22"]},
+    {"id": "r10", "type": "part_of", "from": "ev54", "to": "ev09", "basis": null, "status": "accepted", "scope": "article_scorable", "sources": ["P2-22"]},
+    {"id": "r11", "type": null, "from": "ev26", "to": "ev27", "basis": null, "status": "unresolved", "scope": "article_scorable", "sources": ["P2-02"], "note": "Possible relationship through broader cuts is not established."},
+    {"id": "r12", "type": null, "from": "ev44", "to": "ev43", "basis": null, "status": "unresolved", "scope": "article_scorable", "sources": ["P2-14"], "note": "Do not assume the disbursement implements the prior statement."},
+    {"id": "r13", "type": null, "from": "ev49", "to": "ev48", "basis": null, "status": "unresolved", "scope": "article_scorable", "sources": ["P2-19"], "note": "Meaningfully related, but no specific causal or follows_from relationship is established."}
+  ],
+  "event_level_timelines": [
+    {
+      "id": "t01",
+      "source": "P2-03",
+      "events": ["ev28", "ev29", "ev30", "ev07"],
+      "relations": ["r06", "r07", "r08"],
+      "article_scorable": false,
+      "note": "Jeff's event-level timeline: crisis -> threatened export ban -> pressure for reserve release -> G7 reserve-release decision. Only article 4 -> ev07 is an accepted membership (supported independently by P1-D). The mapping of articles 17 and 88 to timeline steps was Claude's interpretation and is unresolved."
+    }
+  ],
+  "items": [
+    {
+      "id": "P1-A", "pass": 1, "articles": [74, 20], "reviewer_confidence": "high",
+      "reviewer_judgment": "Same originating/parent event (Man City verdict), but distinct downstream developments/reactions.",
+      "memberships": [
+        {"article": 74, "event": "ev02", "role": "reports", "status": "accepted"},
+        {"article": 20, "event": "ev03", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [{"a": 20, "b": 74, "label": "linked", "via": ["r01", "r02"], "note": "Sibling downstream events sharing parent ev01."}]
+    },
+    {
+      "id": "P1-B", "pass": 1, "articles": [163, 164], "reviewer_confidence": "high",
+      "reviewer_judgment": "Same underlying story/event; companion Government of Canada documents (news release + backgrounder), not independent reporting.",
+      "memberships": [
+        {"article": 163, "event": "ev04", "role": "reports", "status": "accepted"},
+        {"article": 164, "event": "ev04", "role": "discusses", "status": "accepted", "document_type": "backgrounder"}
+      ],
+      "pairs": [{"a": 163, "b": 164, "label": "same_event", "independent": false, "note": "Same issuer."}]
+    },
+    {
+      "id": "P1-C", "pass": 1, "articles": [168, 175], "reviewer_confidence": "high",
+      "reviewer_judgment": "Different BT business events. No demonstrated connection beyond shared entity.",
+      "memberships": [
+        {"article": 168, "event": "ev05", "role": "reports", "status": "accepted"},
+        {"article": 175, "event": "ev06", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [{"a": 168, "b": 175, "label": "distinct", "reason": "same_entity"}]
+    },
+    {
+      "id": "P1-D", "pass": 1, "articles": [109, 4], "reviewer_confidence": "high (conceptual); stored evidence incomplete",
+      "reviewer_judgment": "Same underlying G7 energy intervention; official G7 statement vs reporting of the concrete oil/diesel reserve-release action. High confidence conceptually, but stored feed evidence alone is incomplete and richer evidence would be needed for confident assignment.",
+      "memberships": [
+        {"article": 4, "event": "ev07", "role": "reports", "status": "accepted"},
+        {"article": 109, "event": "ev07", "role": null, "status": "unresolved"}
+      ],
+      "pairs": [{"a": 4, "b": 109, "label": "unresolved", "alt_ok": ["same_event"]}]
+    },
+    {
+      "id": "P1-E", "pass": 1, "articles": [94, 95], "reviewer_confidence": "high",
+      "reviewer_judgment": "Duplicate/same Guardian podcast published under two different URLs.",
+      "memberships": [],
+      "pairs": [{"a": 94, "b": 95, "label": "copy_of"}]
+    },
+    {
+      "id": "P1-F", "pass": 1, "articles": [6, 12], "reviewer_confidence": "high",
+      "reviewer_judgment": "Same underlying diesel-price development, but one is the news report and the other is an explainer/background piece about why it happened.",
+      "memberships": [
+        {"article": 6, "event": "ev08", "role": "reports", "status": "accepted"},
+        {"article": 12, "event": "ev08", "role": "discusses", "status": "accepted"}
+      ],
+      "pairs": [{"a": 6, "b": 12, "label": "same_event"}]
+    },
+    {
+      "id": "P1-G", "pass": 1, "articles": [128, 133], "reviewer_confidence": "high",
+      "reviewer_judgment": "Part-of relationship: Sidhu-EU bilateral meeting is a sub-event within the broader G20 participation/meeting.",
+      "memberships": [
+        {"article": 128, "event": "ev09", "role": "reports", "status": "accepted"},
+        {"article": 133, "event": "ev10", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [{"a": 128, "b": 133, "label": "linked", "via": ["r03"]}]
+    },
+    {
+      "id": "P1-H", "pass": 1, "articles": [24, 25], "reviewer_confidence": "high",
+      "reviewer_judgment": "Same broader household-energy-bill development/topic; later piece is practical consumer follow-up/explainer rather than another report of exactly the same event.",
+      "memberships": [],
+      "pairs": [{"a": 24, "b": 25, "label": "not_scored", "note": "Judgment is at broad development/topic level."}]
+    },
+    {
+      "id": "P1-I", "pass": 1, "articles": [170, 168], "reviewer_confidence": "high",
+      "reviewer_judgment": "Same BT-TalkTalk event in different editorial formats: Guardian multi-event live blog vs dedicated BBC article.",
+      "memberships": [
+        {"article": 168, "event": "ev05", "role": "reports", "status": "accepted"},
+        {"article": 170, "event": "ev05", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [{"a": 168, "b": 170, "label": "same_event"}],
+      "article_notes": [{"article": 170, "note": "Multi-event live blog. Its other events were not enumerated by the reviewer and are deliberately not encoded as memberships."}]
+    },
+    {
+      "id": "P1-J", "pass": 1, "articles": [96, 103], "reviewer_confidence": "high",
+      "reviewer_judgment": "Follow-up/developing sequence: Fed watchdog finds no criminal violations -> DOJ declines to reopen investigation.",
+      "memberships": [
+        {"article": 103, "event": "ev15", "role": "reports", "status": "accepted"},
+        {"article": 96, "event": "ev16", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [{"a": 96, "b": 103, "label": "linked", "via": ["r04"]}]
+    },
+    {
+      "id": "P1-K", "pass": 1, "articles": [143, 147], "reviewer_confidence": "medium-high",
+      "reviewer_judgment": "Same Productivity Mega Deduction policy/campaign, but separate promotional announcements with different officials/scope; do not merge as one event from current evidence.",
+      "memberships": [
+        {"article": 143, "event": "ev17", "role": "reports", "status": "accepted"},
+        {"article": 147, "event": "ev18", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [{"a": 143, "b": 147, "label": "distinct", "reason": "same_policy"}],
+      "story_notes": ["Shared Productivity Mega Deduction policy is Story/Thread level only."]
+    },
+    {
+      "id": "P1-L", "pass": 1, "articles": [97, 98], "reviewer_confidence": "high",
+      "reviewer_judgment": "Jobs report -> reported market reaction. The 29,000-jobs report is the underlying economic event; Nasdaq record-high item reports a market reaction associated with it. Preserve attribution rather than asserting independent causality.",
+      "memberships": [
+        {"article": 98, "event": "ev20", "role": "reports", "status": "accepted"},
+        {"article": 97, "event": "ev20", "role": "reports", "status": "accepted"},
+        {"article": 97, "event": "ev21", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [{"a": 97, "b": 98, "label": "same_event", "also_linked_via": ["r05"]}],
+      "article_notes": [{"article": 97, "note": "Intentional multi-event membership: ev20 and ev21 (Jeff decision, 2026-10-05)."}]
+    },
+    {
+      "id": "P1-M", "pass": 1, "articles": [73, 14], "reviewer_confidence": "high",
+      "reviewer_judgment": "Different OpenAI events. A possible causal connection can be hypothesized, but supplied evidence does not establish one.",
+      "memberships": [
+        {"article": 73, "event": "ev23", "role": "reports", "status": "accepted"},
+        {"article": 14, "event": "ev22", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [{"a": 14, "b": 73, "label": "distinct", "reason": "same_entity", "note": "No follows_from: a causal link is not established."}]
+    },
+    {
+      "id": "P1-N", "pass": 1, "articles": [148, 167], "reviewer_confidence": "very high",
+      "reviewer_judgment": "Announcement lifecycle: media advisory/pre-announcement -> actual prescription-drug agreement announcement.",
+      "memberships": [
+        {"article": 167, "event": "ev24", "role": "anticipates", "status": "accepted"},
+        {"article": 148, "event": "ev24", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [{"a": 148, "b": 167, "label": "same_event"}]
+    },
+    {
+      "id": "P1-O", "pass": 1, "articles": [92, 6], "reviewer_confidence": "very high",
+      "reviewer_judgment": "Same underlying UK diesel-price event, independently reported by Guardian and BBC.",
+      "memberships": [
+        {"article": 92, "event": "ev08", "role": "reports", "status": "accepted"},
+        {"article": 6, "event": "ev08", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [{"a": 6, "b": 92, "label": "same_event", "independent": true}]
+    },
+    {
+      "id": "P2-01", "pass": 2, "articles": [151, 150],
+      "memberships": [
+        {"article": 151, "event": "ev25", "role": "reports", "status": "accepted"},
+        {"article": 150, "event": "ev25", "role": "discusses", "status": "accepted", "document_type": "backgrounder"}
+      ],
+      "pairs": [{"a": 150, "b": 151, "label": "same_event"}]
+    },
+    {
+      "id": "P2-02", "pass": 2, "articles": [59, 93],
+      "memberships": [
+        {"article": 59, "event": "ev26", "role": "reports", "status": "accepted"},
+        {"article": 93, "event": "ev27", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [{"a": 59, "b": 93, "label": "unresolved", "constraint": "not_same_event", "via_unresolved": ["r11"]}]
+    },
+    {
+      "id": "P2-03", "pass": 2, "articles": [88, 4, 17],
+      "memberships": [
+        {"article": 4, "event": "ev07", "role": "reports", "status": "accepted"},
+        {"article": 17, "event": "ev30", "role": null, "status": "unresolved", "note": "Mapping to timeline step was Claude's interpretation."},
+        {"article": 88, "event": "ev29", "role": null, "status": "unresolved", "note": "Mapping and role were Claude's interpretation."}
+      ],
+      "pairs": [
+        {"a": 4, "b": 17, "label": "unresolved", "constraint": "not_same_event"},
+        {"a": 17, "b": 88, "label": "unresolved", "constraint": "not_same_event"},
+        {"a": 4, "b": 88, "label": "unresolved", "constraint": "not_same_event"}
+      ],
+      "event_level_timeline": "t01"
+    },
+    {
+      "id": "P2-04", "pass": 2, "articles": [167, 134],
+      "memberships": [
+        {"article": 167, "event": "ev24", "role": "anticipates", "status": "accepted"},
+        {"article": 134, "event": "ev31", "role": "anticipates", "status": "accepted"}
+      ],
+      "pairs": [{"a": 134, "b": 167, "label": "distinct", "reason": "look_alike"}],
+      "story_notes": ["Possible broader federal healthcare activity is not established and is Story/Thread level only."]
+    },
+    {
+      "id": "P2-05", "pass": 2, "articles": [133, 121],
+      "memberships": [
+        {"article": 133, "event": "ev10", "role": "reports", "status": "accepted"},
+        {"article": 121, "event": "ev32", "role": "anticipates", "status": "accepted"}
+      ],
+      "pairs": [{"a": 121, "b": 133, "label": "distinct", "reason": "separate_events"}],
+      "story_notes": ["Broader Canada-EU cooperation connection is Story/Thread level only."]
+    },
+    {
+      "id": "P2-06", "pass": 2, "articles": [138, 158],
+      "memberships": [
+        {"article": 138, "event": "ev33", "role": "reports", "status": "accepted"},
+        {"article": 158, "event": "ev34", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [{"a": 138, "b": 158, "label": "distinct", "reason": "look_alike"}]
+    },
+    {
+      "id": "P2-07", "pass": 2, "articles": [148, 125],
+      "memberships": [
+        {"article": 148, "event": "ev24", "role": "reports", "status": "accepted"},
+        {"article": 125, "event": "ev35", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [{"a": 125, "b": 148, "label": "distinct", "reason": "same_entity", "note": "Shared person, location and time are insufficient."}]
+    },
+    {
+      "id": "P2-08", "pass": 2, "articles": [166, 142, 147],
+      "memberships": [
+        {"article": 166, "event": "ev18", "role": "anticipates", "status": "accepted"},
+        {"article": 147, "event": "ev18", "role": "reports", "status": "accepted"},
+        {"article": 142, "event": "ev19", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [
+        {"a": 147, "b": 166, "label": "same_event"},
+        {"a": 142, "b": 166, "label": "distinct", "reason": "same_policy"},
+        {"a": 142, "b": 147, "label": "distinct", "reason": "same_policy"}
+      ],
+      "story_notes": ["Broader Productivity Mega Deduction policy activity is Story/Thread level only, not a part_of parent event."]
+    },
+    {
+      "id": "P2-09", "pass": 2, "articles": [140, 139],
+      "memberships": [
+        {"article": 140, "event": "ev36", "role": "reports", "status": "accepted"},
+        {"article": 139, "event": "ev36", "role": "discusses", "status": "accepted", "document_type": "backgrounder"}
+      ],
+      "pairs": [{"a": 139, "b": 140, "label": "same_event"}]
+    },
+    {
+      "id": "P2-10", "pass": 2, "articles": [86, 101, 87],
+      "memberships": [
+        {"article": 86, "event": "ev37", "role": "discusses", "status": "accepted"},
+        {"article": 101, "event": "ev37", "role": "discusses", "status": "accepted"},
+        {"article": 87, "event": "ev37", "role": "discusses", "status": "accepted"}
+      ],
+      "pairs": [
+        {"a": 86, "b": 101, "label": "same_event"},
+        {"a": 86, "b": 87, "label": "same_event"},
+        {"a": 87, "b": 101, "label": "same_event"}
+      ]
+    },
+    {
+      "id": "P2-11", "pass": 2, "articles": [110, 115],
+      "memberships": [
+        {"article": 110, "event": "ev38", "role": "reports", "status": "accepted"},
+        {"article": 115, "event": "ev39", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [{"a": 110, "b": 115, "label": "distinct", "reason": "same_entity"}]
+    },
+    {
+      "id": "P2-12", "pass": 2, "articles": [49, 8],
+      "memberships": [],
+      "pairs": [{"a": 8, "b": 49, "label": "distinct", "reason": "same_topic"}]
+    },
+    {
+      "id": "P2-13", "pass": 2, "articles": [113, 176],
+      "memberships": [
+        {"article": 113, "event": "ev41", "role": "reports", "status": "accepted"},
+        {"article": 176, "event": "ev42", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [{"a": 113, "b": 176, "label": "distinct", "reason": "same_topic"}]
+    },
+    {
+      "id": "P2-14", "pass": 2, "articles": [116, 114, 112, 111],
+      "memberships": [
+        {"article": 116, "event": "ev43", "role": "reports", "status": "accepted"},
+        {"article": 114, "event": "ev44", "role": "reports", "status": "accepted"},
+        {"article": 111, "event": "ev44", "role": "reports", "status": "accepted"},
+        {"article": 112, "event": null, "role": null, "status": "not_scored", "note": "Factsheet; no scorable membership."}
+      ],
+      "pairs": [
+        {"a": 111, "b": 114, "label": "same_event"},
+        {"a": 114, "b": 116, "label": "unresolved", "constraint": "not_same_event", "via_unresolved": ["r12"]},
+        {"a": 111, "b": 116, "label": "unresolved", "constraint": "not_same_event", "via_unresolved": ["r12"]},
+        {"a": 112, "b": 116, "label": "not_scored"},
+        {"a": 112, "b": 114, "label": "not_scored"},
+        {"a": 111, "b": 112, "label": "not_scored"}
+      ],
+      "story_notes": ["Broader EU-support-for-Ukraine story thread is Story/Thread level only."]
+    },
+    {
+      "id": "P2-15", "pass": 2, "articles": [97, 98, 7],
+      "memberships": [
+        {"article": 98, "event": "ev20", "role": "reports", "status": "accepted"},
+        {"article": 7, "event": "ev20", "role": "reports", "status": "accepted"},
+        {"article": 97, "event": "ev20", "role": "reports", "status": "accepted"},
+        {"article": 97, "event": "ev21", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [
+        {"a": 7, "b": 98, "label": "same_event"},
+        {"a": 97, "b": 98, "label": "same_event", "also_linked_via": ["r05"]},
+        {"a": 7, "b": 97, "label": "same_event", "also_linked_via": ["r05"]}
+      ],
+      "article_notes": [{"article": 97, "note": "Intentional multi-event membership: ev20 and ev21."}]
+    },
+    {
+      "id": "P2-16", "pass": 2, "articles": [175, 168, 170],
+      "memberships": [
+        {"article": 168, "event": "ev05", "role": "reports", "status": "accepted"},
+        {"article": 170, "event": "ev05", "role": "reports", "status": "accepted"},
+        {"article": 175, "event": "ev06", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [
+        {"a": 168, "b": 170, "label": "same_event"},
+        {"a": 168, "b": 175, "label": "distinct", "reason": "same_entity"},
+        {"a": 170, "b": 175, "label": "distinct", "reason": "same_entity"}
+      ],
+      "article_notes": [{"article": 170, "note": "Multi-event live blog; other events not enumerated and not encoded."}]
+    },
+    {
+      "id": "P2-17", "pass": 2, "articles": [44, 12, 90, 92],
+      "memberships": [
+        {"article": 92, "event": "ev08", "role": "reports", "status": "accepted"},
+        {"article": 12, "event": "ev08", "role": "discusses", "status": "accepted"},
+        {"article": 44, "event": "ev08", "role": null, "status": "accepted", "role_status": "not_scored"},
+        {"article": 90, "event": "ev08", "role": null, "status": "accepted", "role_status": "not_scored"}
+      ],
+      "pairs": [
+        {"a": 12, "b": 44, "label": "same_event"},
+        {"a": 44, "b": 90, "label": "same_event"},
+        {"a": 44, "b": 92, "label": "same_event"},
+        {"a": 12, "b": 90, "label": "same_event"},
+        {"a": 12, "b": 92, "label": "same_event"},
+        {"a": 90, "b": 92, "label": "same_event"}
+      ]
+    },
+    {
+      "id": "P2-18", "pass": 2, "articles": [2, 27, 18],
+      "memberships": [],
+      "pairs": [
+        {"a": 2, "b": 27, "label": "distinct", "reason": "same_topic"},
+        {"a": 2, "b": 18, "label": "distinct", "reason": "same_topic"},
+        {"a": 18, "b": 27, "label": "distinct", "reason": "same_topic"}
+      ]
+    },
+    {
+      "id": "P2-19", "pass": 2, "articles": [100, 105],
+      "memberships": [
+        {"article": 100, "event": "ev49", "role": "reports", "status": "accepted"},
+        {"article": 105, "event": "ev48", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [{"a": 100, "b": 105, "label": "unresolved", "constraint": "not_same_event", "via_unresolved": ["r13"]}],
+      "story_notes": ["Meaningful economic relatedness is Story/Thread level only."]
+    },
+    {
+      "id": "P2-20", "pass": 2, "articles": [104, 107, 26],
+      "memberships": [
+        {"article": 107, "event": "ev50", "role": "reports", "status": "accepted"},
+        {"article": 26, "event": "ev51", "role": "reports", "status": "accepted"},
+        {"article": 104, "event": "ev50", "role": "reports", "status": "accepted"},
+        {"article": 104, "event": "ev51", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [
+        {"a": 104, "b": 107, "label": "same_event"},
+        {"a": 26, "b": 104, "label": "same_event"},
+        {"a": 26, "b": 107, "label": "distinct", "reason": "same_topic"}
+      ],
+      "article_notes": [{"article": 104, "note": "Intentional multi-event membership: ev50 and ev51."}],
+      "story_notes": ["Broad UK economic performance connection is Story/Thread level only."]
+    },
+    {
+      "id": "P2-21", "pass": 2, "articles": [156, 155],
+      "memberships": [
+        {"article": 155, "event": "ev52", "role": "reports", "status": "accepted"},
+        {"article": 156, "event": "ev52", "role": "discusses", "status": "accepted", "document_type": "backgrounder"}
+      ],
+      "pairs": [{"a": 155, "b": 156, "label": "same_event"}]
+    },
+    {
+      "id": "P2-22", "pass": 2, "articles": [130, 128, 135],
+      "memberships": [
+        {"article": 128, "event": "ev09", "role": "reports", "status": "accepted"},
+        {"article": 130, "event": "ev53", "role": "reports", "status": "accepted"},
+        {"article": 135, "event": "ev54", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [
+        {"a": 128, "b": 130, "label": "linked", "via": ["r09"]},
+        {"a": 128, "b": 135, "label": "linked", "via": ["r10"]},
+        {"a": 130, "b": 135, "label": "distinct", "reason": "sibling_sub_events"}
+      ]
+    },
+    {
+      "id": "P2-23", "pass": 2, "articles": [94, 95],
+      "memberships": [],
+      "pairs": [{"a": 94, "b": 95, "label": "copy_of"}]
+    },
+    {
+      "id": "P2-24", "pass": 2, "articles": [43, 25, 5],
+      "memberships": [
+        {"article": 43, "event": "ev13", "role": "reports", "status": "accepted"},
+        {"article": 25, "event": "ev11", "role": "reports", "status": "accepted"},
+        {"article": 5, "event": "ev14", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [
+        {"a": 25, "b": 43, "label": "distinct", "reason": "same_topic"},
+        {"a": 5, "b": 43, "label": "distinct", "reason": "same_topic"},
+        {"a": 5, "b": 25, "label": "distinct", "reason": "same_topic"}
+      ],
+      "story_notes": ["Broad household energy cost connection is Story/Thread level only."]
+    },
+    {
+      "id": "P2-25", "pass": 2, "articles": [74, 85],
+      "memberships": [
+        {"article": 85, "event": "ev01", "role": "discusses", "status": "accepted"},
+        {"article": 74, "event": "ev02", "role": "reports", "status": "accepted"}
+      ],
+      "pairs": [{"a": 74, "b": 85, "label": "linked", "via": ["r01"]}]
+    }
+  ]
+}
