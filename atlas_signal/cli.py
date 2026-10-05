@@ -12,6 +12,10 @@ from atlas_signal.collector import RunSummary, run_collection
 from atlas_signal.config import ConfigError, load_sources, sync_sources
 from atlas_signal.db import SchemaError, open_database
 from atlas_signal.download import Downloader, fetch_url
+from atlas_signal.report import (
+    DATE_STATUSES, FETCH_OUTCOMES, MATCH_METHODS, RUN_STATUSES, ChangeCount, Report,
+    ReportError, build_report, open_read_only, parse_since,
+)
 
 DEFAULT_DB = "data/atlas_signal.sqlite3"
 DEFAULT_SOURCES = "config/sources.toml"
@@ -40,6 +44,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--source", action="append", dest="source_ids", metavar="ID",
         help="collect only this source id (repeatable)",
     )
+
+    report = commands.add_parser(
+        "report",
+        help="summarize collected activity (read-only)",
+        description="Summarize runs, fetches, articles and sightings. Never modifies the database.",
+    )
+    report.add_argument("--db", default=DEFAULT_DB, help=f"SQLite database path (default: {DEFAULT_DB})")
+    report.add_argument(
+        "--since", metavar="YYYY-MM-DD",
+        help="only activity from UTC midnight at the start of this date (default: all time)",
+    )
     return parser
 
 
@@ -53,6 +68,8 @@ def main(
     args = parser.parse_args(argv)
     if args.command == "collect":
         return collect(args, downloader, sleep)
+    if args.command == "report":
+        return report(args)
     parser.print_help()
     return 0
 
@@ -122,3 +139,83 @@ def print_summary(summary: RunSummary) -> None:
     failed = sum(1 for s in summary.sources if s.outcome not in ("ok", "not_modified"))
     print(f"Totals: {entries} entries, {new} new articles, {entry_errors} entry errors, "
           f"{failed} source(s) with errors")
+
+
+def report(args: argparse.Namespace) -> int:
+    since = None
+    if args.since is not None:
+        try:
+            since = parse_since(args.since)
+        except ValueError as err:
+            print(f"error: {err}", file=sys.stderr)
+            return 2
+    try:
+        conn = open_read_only(args.db)
+    except (ReportError, SchemaError) as err:
+        print(f"error: {err}", file=sys.stderr)
+        return 2
+    try:
+        result = build_report(conn, since)
+    except sqlite3.Error as err:
+        print(f"error: cannot read database {args.db!r}: {err}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+    print(format_report(result))
+    return 0
+
+
+def _dist(counts: dict[str, int], order: tuple[str, ...]) -> str:
+    """'a 3, b 1' in a fixed order (unknown keys last), omitting zeros."""
+    keys = [k for k in order if counts.get(k)] + sorted(k for k in counts if k not in order)
+    return ", ".join(f"{k} {counts[k]}" for k in keys) or "none"
+
+
+def _changes(c: ChangeCount) -> str:
+    return f"{c.changed} changed of {c.compared} compared"
+
+
+def format_report(r: Report) -> str:
+    period = f"since {r.since}" if r.since else "all time"
+    methods = dict(r.match_methods)
+    url_matches = methods.get("normalized_url", 0)
+    lines = [
+        f"Atlas Signal report: {period} (generated {r.generated_at})",
+        f"Runs: {r.run_count} ({_dist(r.runs, RUN_STATUSES)})",
+        f"Fetches: {r.fetch_count} ({_dist(r.fetch_outcomes, FETCH_OUTCOMES)})",
+        f"Feed entries observed: {r.entries_observed}; entry errors: {r.entry_errors}",
+        f"Sightings: {r.sightings}; new articles: {r.new_articles};"
+        f" articles in database (all time): {r.articles_all_time}",
+        "",
+        "Dedup and change signals",
+        f"  Match methods: {_dist(methods, MATCH_METHODS)}",
+        f"  normalized_url matches: {url_matches}"
+        f" ({r.cross_source_url_matches} to another source's article,"
+        f" {url_matches - r.cross_source_url_matches} same source)",
+        f"  guid matches: {methods.get('guid', 0)}",
+        f"  Articles seen from more than one source: {r.multi_source_articles}",
+        f"  Articles with more than one sighting: {r.multi_sighting_articles}",
+        f"  Recurring GUID fingerprints: {_changes(r.fingerprint_changes)}"
+        f" ({r.fingerprint_changed_guids} distinct GUIDs changed)",
+        f"  Feed bodies vs previous successful fetch: {_changes(r.body_changes)}",
+        "",
+    ]
+    if not r.sources:
+        lines.append("Sources: no activity in this period")
+    else:
+        lines.append("Sources")
+    for s in r.sources:
+        fields = ", ".join(f"{f} {n}" for f, n in s.fields_present.items())
+        lines += [
+            f"  {s.source_id}",
+            f"    fetches {s.fetches}, successful {s.successful_fetches}"
+            f" ({_dist(s.outcomes, FETCH_OUTCOMES)});"
+            f" entries {s.entries_observed}; entry errors {s.entry_errors}",
+            f"    sightings {s.sightings} ({_dist(s.match_methods, MATCH_METHODS)});"
+            f" with GUID {s.guid_present}/{s.sightings}",
+            f"    new articles {s.new_articles}; fields present: {fields};"
+            f" date status: {_dist(s.date_statuses, DATE_STATUSES)}",
+            f"    fingerprints: {_changes(s.fingerprint_changes)};"
+            f" feed bodies: {_changes(s.body_changes)}",
+        ]
+    return "\n".join(lines)
