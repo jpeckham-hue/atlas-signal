@@ -877,6 +877,32 @@ performance:
   no issuing unit or document type; that observation is not the reason for the
   rule and is not encoded as a corpus-specific exception.
 
+Implementation clarification, discovered during the read-only S5 step 5
+(`follows_from`) implementation review after checkpoint
+`a7fabbfbf445a23cbb79abf6b4005c9f6776c669`, before any `follows_from` code, real
+Stage B prediction or gold evaluation:
+
+- **C19 — Mutual `follows_from` claims.** S5 evaluates `follows_from`
+  independently per cue article, and a `follows_from` match does not make the
+  pair terminal at S5. When two articles at an allowed timing boundary
+  independently produce valid opposite-direction claims against each other,
+  both pending article-level claims are retained; processing order must not
+  suppress either. The pair receives the ordinary `follows_from` cannot-link,
+  one symmetric pair-level blocking fact rather than two. S5 creates no
+  clustering edge for either direction and does not choose a winning
+  direction. At S10, if the retained claims would produce both `A follows_from
+  B` and `B follows_from A` between the same two resolved events, the mutual
+  claims are treated as unresolved directional evidence and neither event-level
+  relation is emitted; no direction is chosen by article ID, URL, processing
+  order, timestamp tie-break, cue order or any other arbitrary mechanism. The
+  evidence and provenance are preserved for diagnostics and artifact reporting
+  as specified later, but mutuality itself never becomes an event relation.
+  Cue vocabulary, antecedent matching thresholds, timing, the candidate
+  boundary, cannot-link rules, T1 and S10's existing requirement that a pending
+  claim map unambiguously to resolved events are unchanged. This is a
+  conservative, order-independent resolution of an otherwise possible
+  directional cycle, not chosen from observed Stage B performance.
+
 **Provenance.** The Stage B prediction artifact records the frozen corpus,
 candidate-artifact and Stage A configuration identities and a Stage B
 specification/configuration hash. It does not need to contain the commit hash
