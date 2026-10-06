@@ -821,6 +821,24 @@ deterministic reading, not from observed evaluation performance:
     "years of decline", "several years of decline", "Britain's 10 years of …".
     No general number-word parsing and no further lexicon.
 
+Implementation clarification, discovered while implementing S5 step 3 after
+checkpoint `5f66c271cc449752ed0e8ee4b763d1a0d4bbe3a4` and before any real
+Stage B prediction or gold evaluation; chosen by extending the frozen C9
+container principle, not from observed Stage B performance:
+
+- **C16 — Companion pairs involving a container.** Companion qualification is
+  unchanged: same issuing unit, a news release and a backgrounder, at most 60
+  minutes apart, and cosine ≥ 0.15 or a shared distinctive number. A
+  qualifying candidate pair involving a container receives the terminal
+  pair-level `companion` decision but, consistent with C9, no companion
+  clustering edge; companion therefore never gives a container shared event
+  membership, and S8 remains the only membership route for containers. A
+  qualifying pair of two non-containers keeps its structural companion edge.
+  No cannot-link is created, and candidate-boundedness (C1) is unchanged. In the
+  frozen Run 1 corpus this branch is expected to be unreachable because the
+  identified containers carry no document type; that observation is not the
+  reason for the rule and is not encoded as a corpus-specific exception.
+
 **Provenance.** The Stage B prediction artifact records the frozen corpus,
 candidate-artifact and Stage A configuration identities and a Stage B
 specification/configuration hash. It does not need to contain the commit hash
