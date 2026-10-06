@@ -888,5 +888,218 @@ class AdvisoryStateTests(Fixture):
         self.assertEqual(by_url(*self.run_s5()), by_url(*self.run_s5(permuted)))
 
 
+# --- S5 step 5: follows_from cue ------------------------------------------------
+
+
+def many_fillers(start, n=60):
+    return [article(start + k, url=f"https://example.test/filler/n{k}", title=f"Note item{k}x",
+                    summary=f"About entry{k}y only.", published_at="2026-01-10T08:00:00Z")
+            for k in range(n)]
+
+
+def pa(i, slug, title, summary, hour, minute=0, path="news"):
+    return article(i, url=f"https://example.test/{path}/{slug}", title=title, summary=summary,
+                   published_at=f"2026-01-10T{hour:02d}:{minute:02d}:00Z",
+                   first_seen_at=f"2026-01-10T{hour:02d}:{minute:02d}:00Z")
+
+
+class CueTests(unittest.TestCase):
+    def cue(self, title):
+        return sb.find_first_cue(title)
+
+    def test_all_cue_forms(self):
+        for phrase in sb.FOLLOWS_FROM_CUES:
+            with self.subTest(phrase=phrase):
+                c = self.cue(f"Rally {phrase} vote")
+                self.assertEqual((c.phrase, c.antecedent, c.position), (phrase, "vote", 1))
+
+    def test_whole_tokens_only(self):
+        self.assertIsNone(self.cue("Afternoon session opens"))
+        self.assertIsNone(self.cue("Thereafter calm returns"))
+        self.assertEqual(self.cue("Shares fall After vote").phrase, "after")
+
+    def test_first_cue_and_span(self):
+        c = self.cue("Rally after vote following strike")
+        self.assertEqual((c.phrase, c.antecedent), ("after", "vote following strike"))
+        self.assertEqual(self.cue("Rally after vote; markets react").antecedent, "vote")
+        self.assertEqual(self.cue("Rally after vote \u2013 as it happened").antecedent, "vote")
+        self.assertEqual(self.cue("Rally after vote - live").antecedent, "vote")
+        self.assertEqual(self.cue("Rally after vote\u2014live").antecedent, "vote-live")
+        self.assertEqual(self.cue("Shares fall after; markets").antecedent, "")
+
+    def test_time_expression_prefix(self):
+        for span in ("10 years", "10 years of decline", "10-year decline", "two decades of decline",
+                     "a decade of decline", "an hour later", "the year before the vote",
+                     "\u00a35m years", "ten days"):
+            with self.subTest(span=span):
+                self.assertTrue(sb.time_expression_prefix(span))
+        for span in ("years of decline", "several years of decline", "britain's 10 years of",
+                     "eleven years", "a vote", "10 votes", "decade"):
+            with self.subTest(span=span):
+                self.assertFalse(sb.time_expression_prefix(span))
+
+
+class ClauseMatchTests(Fixture):
+    # |(2, 4, 2, 1)| = 5, so the cosine with {"x": 1} is exactly 2/5.
+    AT_040 = {"x": 2.0, "a": 4.0, "b": 2.0, "c": 1.0}
+
+    def test_cosine_boundary(self):
+        empty = frozenset()
+        self.assertTrue(sb.clause_matches(self.AT_040, empty, {"x": 1.0}, empty, empty))
+        below = dict(self.AT_040, d=0.01)
+        self.assertFalse(sb.clause_matches(below, empty, {"x": 1.0}, empty, empty))
+
+    def test_number_branch_needs_number_and_positive_shared_token(self):
+        rows = ([article(i, url=f"https://example.test/h/{i}", title=f"Harbour item{i}z",
+                         summary="Harbour note.") for i in range(1, 5)]
+                + [article(i, source="gov-b", url=f"https://example.test/g/{i}",
+                           title=f"Gov item{i}z", summary="Plain note.") for i in range(5, 14)]
+                + [article(14, source="gov-b", url="https://example.test/g/14",
+                           title="Harbour quay works", summary="It cost \u00a37m."),
+                   article(15, url="https://example.test/h/15", title="Other item15z",
+                           summary="Also \u00a37m.")]
+                + many_fillers(100, 6))
+        c, model = self.load(rows)
+        self.assertIn("harbour", model.common["pub-a"])
+        self.assertNotIn("harbour", model.common["gov-b"])
+        self.assertIn("\u00a37000000", model.distinctive)
+        member = {"harbour": 1.0, "zz": 10.0}
+        amounts = frozenset({"\u00a37000000"})
+        span = "harbour \u00a37m"
+        gov_vec = sb.clause_vector(span, "gov-b", model)
+        pub_vec = sb.clause_vector(span, "pub-a", model)
+        self.assertIn("harbour", gov_vec)
+        self.assertNotIn("harbour", pub_vec)                     # R3: cue source zero weight
+        span_amounts = frozenset({"\u00a37000000"})
+        self.assertTrue(sb.clause_matches(gov_vec, span_amounts, member, amounts, model.distinctive))
+        self.assertFalse(sb.clause_matches(pub_vec, span_amounts, member, amounts, model.distinctive))
+        self.assertFalse(sb.clause_matches(gov_vec, span_amounts, {"zz": 1.0}, amounts,
+                                           model.distinctive))   # number without shared token
+        self.assertFalse(sb.clause_matches(gov_vec, frozenset(), member, frozenset(),
+                                           model.distinctive))   # token without number
+
+
+FLOOD = "Flooding at the copper mine halts output."
+
+
+def follows_rows(ids=tuple(range(1, 20))):
+    i = iter(ids)
+    return [
+        pa(next(i), "y1", "Copper mine flooding halts output", FLOOD, 10),                 # 1
+        pa(next(i), "x1", "Shares slide after copper mine flooding", "Mining shares slid.", 12),  # 2
+        pa(next(i), "ylate", "Copper mine flooding worsens", FLOOD, 14),                   # 3 later
+        pa(next(i), "ycont", "Copper mine flooding - live", FLOOD, 11, path="live"),       # 4 container
+        pa(next(i), "y2", "Copper mine flooding inquiry opens", FLOOD, 9),                 # 5
+        pa(next(i), "x2", "Bank rallies following Zeta merger news", "Banks rallied.", 12),  # 6
+        pa(next(i), "y3", "Zeta merger news lifts market", "The Zeta merger news.", 12),    # 7 equal time
+        pa(next(i), "ma", "Fooland exports rise after Barland tariff cut",
+           "Exports from Fooland rose.", 15),                                               # 8
+        pa(next(i), "mb", "Barland tariff cut announced following Fooland exports rise",
+           "Barland cut its tariff.", 15),                                                  # 9
+        pa(next(i), "x3", "Prices ease after holiday lull", "Prices eased.", 16),           # 10
+        pa(next(i), "y4", "Prices ease in quiet trading", "Prices eased in quiet trading.", 13),  # 11
+        pa(next(i), "x4", "Rally after holiday lull; gains following copper mine flooding",
+           "Gains.", 13),                                                                   # 12
+        pa(next(i), "x5", "Rally after 10 years; gains following copper mine flooding",
+           "Gains.", 13),                                                                   # 13
+        pa(next(i), "x6", "Copper mine flooding hits shares",
+           "Shares fell after copper mine flooding.", 13),                                 # 14
+        pa(next(i), "x7", "Markets react after copper mine flooding - as it happened",
+           "Markets reacted.", 13, path="live"),                                            # 15
+        *many_fillers(200),
+    ]
+
+
+class FollowsFromStateTests(Fixture):
+    IDS = tuple(range(1, 16))
+
+    def build(self, ids=IDS, drop=()):
+        c, model = self.load(follows_rows(ids))
+        artifact = json.loads(predict.canonical_json(predict.stage_a_artifact(c)))
+        artifact["candidates"] = [r for r in artifact["candidates"] if (r["a"], r["b"]) not in drop]
+        artifact["candidate_count"] = len(artifact["candidates"])
+        return c, sb.StageBState(c, model, sb.validate_candidate_artifact(artifact, c, model))
+
+    def run_s5(self, ids=IDS, drop=(), preset=None):
+        c, state = self.build(ids, drop)
+        for step in (sb.apply_copy_of, sb.apply_slot_conflict, sb.apply_companion, sb.apply_advisory):
+            step(state)
+        if preset:
+            preset(state)
+        sb.apply_follows_from(state)
+        return c, state
+
+    def p(self, state, x, y):
+        return state.pairs[(min(x, y), max(x, y))]
+
+    def test_preconditions(self):
+        c, state = self.build()
+        for key in ((1, 2), (2, 3), (2, 4), (2, 5), (6, 7), (8, 9), (10, 11), (1, 12), (1, 13),
+                    (1, 14), (1, 15), (5, 15)):
+            self.assertIn(key, state.pairs)
+        self.assertTrue(state.articles[4].container_flag and state.articles[15].container_flag)
+        for x in (2, 6, 8, 9):
+            self.assertIsNone(state.pairs[(min(x, 1), max(x, 1))].terminal
+                              if (min(x, 1), max(x, 1)) in state.pairs else None)
+
+    def test_claims_and_cannot_links(self):
+        c, state = self.run_s5()
+        # X1: earlier Y2 and Y1 qualify; the later article and the container do not.
+        claim = state.pending[2]
+        self.assertEqual((claim.cue, claim.cue_position, claim.antecedents), ("after", 2, (5, 1)))
+        self.assertEqual(self.p(state, 1, 2).cannot_link, "follows_from")
+        self.assertEqual(self.p(state, 2, 5).cannot_link, "follows_from")
+        self.assertIsNone(self.p(state, 2, 3).cannot_link)       # later partner (G4)
+        self.assertIsNone(self.p(state, 2, 4).cannot_link)       # container partner (R2)
+        self.assertEqual(state.pending[6].antecedents, (7,))     # equal time accepted
+        # Container cue article allowed; earlier and equal-time matches, in (time, url) order.
+        self.assertEqual(state.pending[15].antecedents, (5, 1, 2, 13, 14))
+        for x in (10, 12, 13, 14):                               # no match, fallbacks, summary cue
+            with self.subTest(x=x):
+                self.assertNotIn(x, state.pending)
+        self.assertIsNone(self.p(state, 10, 11).cannot_link)
+        self.assertIsNone(self.p(state, 1, 12).cannot_link)
+        self.assertIsNone(self.p(state, 1, 13).cannot_link)
+        self.assertEqual(state.edges, [])
+        # follows_from never makes a pair terminal.
+        self.assertFalse([p for p in state.pairs.values()
+                          if p.cannot_link == "follows_from" and p.terminal])
+
+    def test_mutual_claims_are_both_kept(self):
+        c, state = self.run_s5()
+        self.assertEqual(state.pending[8].antecedents, (9,))
+        self.assertEqual(state.pending[9].antecedents, (8,))
+        pair = self.p(state, 8, 9)
+        self.assertEqual((pair.terminal, pair.edge, pair.cannot_link), (None, None, "follows_from"))
+
+    def test_earlier_terminal_pair_is_skipped(self):
+        def preset(state):
+            state.pairs[(1, 2)].terminal = "copy_of"
+        c, state = self.run_s5(preset=preset)
+        self.assertEqual(state.pending[2].antecedents, (5,))
+        self.assertIsNone(self.p(state, 1, 2).cannot_link)
+
+    def test_non_candidate_antecedent_ignored(self):
+        c, state = self.run_s5(drop={(1, 2)})
+        self.assertEqual(state.pending[2].antecedents, (5,))
+
+    def test_idempotent(self):
+        c, state = self.run_s5()
+        before = (copy.deepcopy(state.pairs), dict(state.pending), list(state.edges))
+        sb.apply_follows_from(state)
+        self.assertEqual((state.pairs, state.pending, state.edges), before)
+
+    def test_article_id_permutation(self):
+        def by_url(c, state):
+            url = {a.id: a.normalized_url for a in c.articles}
+            pending = {url[x]: (r.cue, r.cue_position, tuple(url[y] for y in r.antecedents))
+                       for x, r in state.pending.items()}
+            pairs = {tuple(sorted((url[p.a], url[p.b]))): (p.terminal, p.cannot_link)
+                     for p in state.pairs.values()}
+            return pending, pairs
+        permuted = tuple(random.Random(8).sample(range(1, 120), 15))
+        self.assertEqual(by_url(*self.run_s5()), by_url(*self.run_s5(permuted)))
+
+
 if __name__ == "__main__":
     unittest.main()

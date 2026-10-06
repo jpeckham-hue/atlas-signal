@@ -1,18 +1,19 @@
 """Experiment 002 Stage B (relationship classification), research only.
 
 Implemented so far: loading and integrity validation of the sealed Stage A
-candidate artifact, candidate pair state, and S5 steps 1-4 (`copy_of`,
-template slot conflict, companion documents, advisory match). S5 step 5
-(`follows_from` cue) and S6-S11 are not implemented yet.
+candidate artifact, candidate pair state, and S5 steps 1-5 (`copy_of`,
+template slot conflict, companion documents, advisory match, `follows_from`
+cue). S6-S11 are not implemented yet.
 
 Specification: docs/experiments/002-event-relationship-baseline.md, sections
 5-12 and the Stage B pre-implementation clarifications (C1-C15, R1-R5,
-G1-G6, H1-H3, T1, C16-C18). Stage B is candidate-bounded (C1): only pairs in the
+G1-G6, H1-H3, T1, C16-C19). Stage B is candidate-bounded (C1): only pairs in the
 sealed Stage A candidate artifact receive decisions.
 """
 
 import hashlib
 import json
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -28,8 +29,12 @@ from .text import (
     compare_title_templates,
     cosine,
     document_frequencies,
+    extract_numbers,
     jaccard,
+    normalize_text,
     token_kinds,
+    tokenize,
+    weighted_vector,
 )
 
 
@@ -94,6 +99,7 @@ class StageBState:
     model: CorpusModel
     pairs: dict[tuple[int, int], PairState]   # sorted by (a, b)
     edges: list[Edge] = field(default_factory=list)
+    pending: dict[int, "PendingRelation"] = field(default_factory=dict)  # by cue article
 
     def __post_init__(self):
         self.articles: dict[int, Article] = {a.id: a for a in self.corpus.articles}
@@ -431,3 +437,143 @@ def apply_advisory(state: StageBState) -> None:
         if not (a.container_flag or b.container_flag):
             pair.edge = "advisory"
             state.edges.append(Edge("advisory", pair.a, pair.b, pair.cosine))
+
+
+# --- S5 step 5: follows_from cue -----------------------------------------------
+
+FOLLOWS_FROM_CUES = ("after", "following", "in response to", "in the wake of", "prompted by")
+_CUE_PATTERNS = [
+    (cue, re.compile(r"(?<![^\W_])" + r"\s+".join(re.escape(w) for w in cue.split())
+                     + r"(?![^\W_])"))
+    for cue in FOLLOWS_FROM_CUES
+]
+_SPAN_END = re.compile(r";|\s-\s")
+TIME_UNITS = frozenset(u + suffix for u in ("second", "minute", "hour", "day", "week", "month",
+                                            "year", "decade") for suffix in ("", "s"))
+TIME_ARTICLES = frozenset({"a", "an", "the"})
+NUMBER_WORDS = frozenset({"one", "two", "three", "four", "five", "six", "seven", "eight",
+                          "nine", "ten"})
+
+
+@dataclass(frozen=True)
+class Cue:
+    """The first frozen cue in a normalized title and its antecedent span (C6)."""
+
+    phrase: str
+    position: int            # index of the cue's first token in token_kinds(title)
+    start: int               # character offsets of the cue in the normalized title
+    end: int
+    antecedent: str          # normalized antecedent span (may be empty)
+
+
+@dataclass(frozen=True)
+class PendingRelation:
+    """An article-level `follows_from` claim recorded at S5 (C2), mapped at S10."""
+
+    cue_article: int
+    cue: str
+    cue_position: int
+    cue_start: int
+    cue_end: int
+    antecedents: tuple[int, ...]   # sorted by (representative time, normalized_url)
+
+
+def find_first_cue(title: str | None) -> Cue | None:
+    """First frozen cue occurrence in the normalized title (R4) and its span (C6).
+
+    Cues match whole tokens (no substring matches such as "afternoon"). The
+    antecedent runs from after the cue to the first semicolon, spaced dash or
+    end of title; later cues inside it do not end it.
+    """
+    text = normalize_text(title)
+    found = [(m.start(), m.end(), cue) for cue, pattern in _CUE_PATTERNS
+             for m in [pattern.search(text)] if m]
+    if not found:
+        return None
+    start, end, cue = min(found)
+    rest = text[end:]
+    stop = _SPAN_END.search(rest)
+    antecedent = (rest[:stop.start()] if stop else rest).strip()
+    return Cue(cue, len(token_kinds(text[:start])), start, end, antecedent)
+
+
+def time_expression_prefix(antecedent: str) -> bool:
+    """T1: the span begins with NUMBER TIME_UNIT or ARTICLE TIME_UNIT."""
+    kinds = token_kinds(antecedent)
+    if len(kinds) < 2 or kinds[1].raw not in TIME_UNITS:
+        return False
+    first = kinds[0]
+    return first.number or first.raw in NUMBER_WORDS or first.raw in TIME_ARTICLES
+
+
+def clause_vector(text: str, source_id: str, model: CorpusModel) -> dict[str, float]:
+    """C3/R3 clause vector: frozen tokenizer and IDF, title weight 1, and the
+    given source's source-common tokens at zero weight."""
+    return weighted_vector(tokenize(text), [], model.idf, title_weight=1,
+                           zero_weight=model.common.get(source_id, frozenset()))
+
+
+def clause_matches(
+    clause_vec: dict[str, float],
+    clause_amounts: frozenset[str],
+    member_vec: dict[str, float],
+    member_amounts: frozenset[str],
+    distinctive: frozenset[str],
+) -> bool:
+    """Frozen clause-match condition (section 7, C3, H3).
+
+    (a) a shared distinctive number plus a shared non-amount content token with
+    positive weight in both vectors; or (b) cosine at least
+    CONTAINER_CLAUSE_COSINE (compared as its float, the Stage A convention).
+    """
+    if cosine(clause_vec, member_vec) >= float(rules.CONTAINER_CLAUSE_COSINE):
+        return True
+    if not (clause_amounts & member_amounts & distinctive):
+        return False
+    shared = (set(clause_vec) & set(member_vec)) - clause_amounts - member_amounts
+    return bool(shared)
+
+
+def _order_key(article: Article) -> tuple:
+    return (article.representative_time, article.normalized_url)
+
+
+def apply_follows_from(state: StageBState) -> None:
+    """S5 step 5 for every cue article, each evaluated independently (C19).
+
+    Only the first cue is evaluated (R4); a time-expression antecedent abstains
+    (T1). Eligible partners are non-container (R2) candidate partners whose
+    pair is not terminal (C1, H1) and whose representative time is not later
+    than the cue article's (G4). Each qualifying partner gets a symmetric
+    `follows_from` cannot-link; one pending claim lists all of them. No edge
+    is created and no pair becomes terminal.
+    """
+    partners: dict[int, list[PairState]] = {}
+    for pair in state.pairs.values():
+        if pair.terminal is None:
+            partners.setdefault(pair.a, []).append(pair)
+            partners.setdefault(pair.b, []).append(pair)
+    features = state.features
+    for x in sorted(partners, key=lambda i: _order_key(state.articles[i])):
+        cue_article = state.articles[x]
+        cue = find_first_cue(cue_article.title)
+        if cue is None or not cue.antecedent or time_expression_prefix(cue.antecedent):
+            continue
+        vec = clause_vector(cue.antecedent, cue_article.source_id, state.model)
+        amounts = frozenset(a.key for a in extract_numbers(cue.antecedent))
+        matched = []
+        for pair in partners[x]:
+            y = state.articles[pair.b if pair.a == x else pair.a]
+            if y.container_flag or y.representative_time > cue_article.representative_time:
+                continue
+            if clause_matches(vec, amounts, features[y.id].vector, state.model.numbers[y.id],
+                              state.model.distinctive):
+                matched.append((pair, y))
+        if not matched:
+            continue
+        for pair, _ in matched:
+            pair.cannot_link = "follows_from"
+        state.pending[x] = PendingRelation(
+            cue_article=x, cue=cue.phrase, cue_position=cue.position, cue_start=cue.start,
+            cue_end=cue.end,
+            antecedents=tuple(y.id for _, y in sorted(matched, key=lambda m: _order_key(m[1]))))
