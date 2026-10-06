@@ -1,8 +1,9 @@
 """Experiment 002 Stage B (relationship classification), research only.
 
 Implemented so far: loading and integrity validation of the sealed Stage A
-candidate artifact, candidate pair state, S5 step 1 (`copy_of`) and S5 step 2
-(template slot conflict). Later S5 steps and S6-S11 are not implemented yet.
+candidate artifact, candidate pair state, and S5 steps 1-3 (`copy_of`,
+template slot conflict, companion documents). Later S5 steps and S6-S11 are
+not implemented yet.
 
 Specification: docs/experiments/002-event-relationship-baseline.md, sections
 5-12 and the Stage B pre-implementation clarifications (C1-C15, R1-R5,
@@ -261,3 +262,44 @@ def slot_conflict_cannot_link(state: StageBState, x: int, y: int) -> bool:
     if key in state.pairs:
         return state.pairs[key].cannot_link == SLOT_CONFLICT
     return slot_conflict(state.articles[x], state.articles[y])
+
+
+# --- S5 step 3: companion documents --------------------------------------------
+
+COMPANION_TYPES = frozenset({"news releases", "backgrounders"})
+
+
+def companion_qualifies(a: Article, b: Article, pair_cosine: float, model: CorpusModel) -> bool:
+    """Frozen companion rule (design section 6, S5 step 3).
+
+    Same (non-empty) issuing unit; one news release and one backgrounder;
+    representative times at most COMPANION_MAX_MINUTES apart; and cosine at
+    least COMPANION_MIN_COSINE (compared as its float, the Stage A convention)
+    or a shared distinctive number.
+    """
+    if a.issuing_unit is None or a.issuing_unit != b.issuing_unit:
+        return False
+    if {a.document_type, b.document_type} != COMPANION_TYPES:
+        return False
+    if abs(a.representative_time - b.representative_time) > \
+            timedelta(minutes=rules.COMPANION_MAX_MINUTES):
+        return False
+    if pair_cosine >= float(rules.COMPANION_MIN_COSINE):
+        return True
+    return bool(model.numbers[a.id] & model.numbers[b.id] & model.distinctive)
+
+
+def apply_companion(state: StageBState) -> None:
+    """S5 step 3, sealed candidate pairs only (C1). A non-terminal qualifying
+    pair becomes terminal ``companion``. A pair of two non-containers also gets
+    one companion edge; a pair involving a container gets none (C9, C16)."""
+    for pair in state.pairs.values():
+        if pair.terminal is not None:
+            continue
+        a, b = state.articles[pair.a], state.articles[pair.b]
+        if not companion_qualifies(a, b, pair.cosine, state.model):
+            continue
+        pair.terminal = "companion"
+        if not (a.container_flag or b.container_flag):
+            pair.edge = "companion"
+            state.edges.append(Edge("companion", pair.a, pair.b, pair.cosine))

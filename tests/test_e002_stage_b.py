@@ -5,6 +5,7 @@ Synthetic fixtures only; no repository gold and no sealed real artifact.
 
 import copy
 import json
+import math
 import random
 import tempfile
 import unittest
@@ -470,6 +471,177 @@ class SlotConflictStateTests(Fixture):
                     for p in state.pairs.values()}
         self.assertEqual(by_url(*self.run_s5((1, 2, 3, 4, 5, 6, 7))),
                          by_url(*self.run_s5((70, 9, 33, 4, 58, 21, 2))))
+
+
+# --- S5 step 3: companion documents ---------------------------------------------
+
+
+def gov(i, unit, doc_type, title, summary, minute=0, second=0, hour=12, path="news"):
+    slug = "-".join(title.lower().split())
+    return article(i, source="gov-b", url=f"https://www.canada.ca/en/{unit}/{path}/{slug}.html",
+                   title=title, summary=summary, date_status="updated_only", published_at=None,
+                   updated_at=f"2026-01-10T{hour:02d}:{minute:02d}:{second:02d}Z",
+                   sightings=((None, [doc_type]),))
+
+
+REL, BKG = "news releases", "backgrounders"
+
+
+def companion_rows(ids=tuple(range(1, 19))):
+    i = iter(ids)
+    harbour = "The harbour upgrade at Zeta adds new berths, cranes and storage for regional shippers."
+    return [
+        # 1, 2: similar text, 30 minutes apart -> cosine branch
+        gov(next(i), "alpha-unit", REL, "Funding for Zeta harbour upgrade", harbour),
+        gov(next(i), "alpha-unit", BKG, "Zeta harbour upgrade details", harbour, minute=30),
+        # 3, 4: dissimilar text, shared distinctive amount -> number branch
+        gov(next(i), "beta-unit", REL, "Ministers announce orchard grants",
+            "Growers in the valley receive $20 million for irrigation."),
+        gov(next(i), "beta-unit", BKG, "List of recipients",
+            "Eligible cooperatives and schedules: $20 million total envelope."),
+        # 5, 6: dissimilar text, only non-distinctive or excluded numbers shared
+        gov(next(i), "gamma-unit", REL, "Lantern festival support",
+            "In 2026 the 50 lantern makers share 300 units of support."),
+        gov(next(i), "gamma-unit", BKG, "Programme schedule",
+            "Timeline for 2026, 50 workshops and 300 units of materials."),
+        # 7, 8: similar text, 60 minutes + 1 second apart
+        gov(next(i), "delta-unit", REL, "Glacier station opens", harbour.replace("harbour", "glacier station")),
+        gov(next(i), "delta-unit", BKG, "Glacier station details",
+            harbour.replace("harbour", "glacier station"), hour=13, second=1),
+        # 9, 10: similar text, exactly 60 minutes apart
+        gov(next(i), "eta-unit", REL, "Meadow depot opens", harbour.replace("harbour", "meadow depot")),
+        gov(next(i), "eta-unit", BKG, "Meadow depot details",
+            harbour.replace("harbour", "meadow depot"), hour=13),
+        # 11, 12: similar text, different issuing units
+        gov(next(i), "theta-unit", REL, "Quarry road repaired", harbour.replace("harbour", "quarry road")),
+        gov(next(i), "iota-unit", BKG, "Quarry road details", harbour.replace("harbour", "quarry road")),
+        # 13, 14: similar text, both news releases
+        gov(next(i), "kappa-unit", REL, "Saddle bridge reopens", harbour.replace("harbour", "saddle bridge")),
+        gov(next(i), "kappa-unit", REL, "Saddle bridge reopens today",
+            harbour.replace("harbour", "saddle bridge")),
+        *[article(next(i), url=f"https://example.test/common/{k}", title=f"Common item {k}",
+                  summary=f"Unrelated note {k} on 300 units.") for k in range(4)],
+        *fillers(100),
+    ]
+
+
+class CompanionFixture(Fixture):
+    IDS = tuple(range(1, 19))
+
+    def build(self, ids=IDS, drop=()):
+        c, model = self.load(companion_rows(ids))
+        artifact = json.loads(predict.canonical_json(predict.stage_a_artifact(c)))
+        artifact["candidates"] = [r for r in artifact["candidates"] if (r["a"], r["b"]) not in drop]
+        artifact["candidate_count"] = len(artifact["candidates"])
+        state = sb.StageBState(c, model, sb.validate_candidate_artifact(artifact, c, model))
+        return c, state
+
+    def run_s5(self, ids=IDS, drop=()):
+        c, state = self.build(ids, drop)
+        sb.apply_copy_of(state)
+        sb.apply_slot_conflict(state)
+        sb.apply_companion(state)
+        return c, state
+
+
+class CompanionRuleTests(CompanionFixture):
+    def setUp(self):
+        super().setUp()
+        self.c, self.state = self.build()
+        self.arts = self.state.articles
+
+    def qualifies(self, x, y, cos=None):
+        p = self.state.pairs[(x, y)]
+        return sb.companion_qualifies(self.arts[x], self.arts[y],
+                                      p.cosine if cos is None else cos, self.state.model)
+
+    def test_cosine_boundary_is_behavioural(self):
+        # Pair 5, 6 meets every non-evidence condition and shares no distinctive number.
+        self.assertTrue(self.qualifies(5, 6, cos=0.15))
+        self.assertFalse(self.qualifies(5, 6, cos=math.nextafter(0.15, 0.0)))
+
+    def test_number_branch_and_exclusions(self):
+        self.assertLess(self.state.pairs[(3, 4)].cosine, 0.15)
+        self.assertTrue(self.qualifies(3, 4))                 # shared $20 million
+        self.assertTrue(self.qualifies(3, 4, cos=0.0))
+        self.assertLess(self.state.pairs[(5, 6)].cosine, 0.15)
+        self.assertFalse(self.qualifies(5, 6))                # 2026, 50, 300 do not count
+
+    def test_time_boundary(self):
+        self.assertTrue(self.qualifies(9, 10))                # exactly 60 minutes
+        self.assertFalse(self.qualifies(7, 8))                # 60 minutes + 1 second
+
+    def test_unit_and_type_pairing(self):
+        self.assertIn((11, 12), self.state.pairs)             # fixture precondition
+        self.assertFalse(self.qualifies(11, 12))              # different issuing units
+        self.assertFalse(self.qualifies(13, 14))              # two news releases
+        self.assertTrue(self.qualifies(1, 2))
+
+
+class CompanionStateTests(CompanionFixture):
+    def test_transitions(self):
+        c, state = self.run_s5()
+        for key in ((1, 2), (3, 4), (5, 6), (7, 8), (9, 10), (13, 14)):
+            self.assertIn(key, state.pairs)                   # fixture precondition
+        for key in ((1, 2), (3, 4), (9, 10)):
+            p = state.pairs[key]
+            self.assertEqual((p.terminal, p.edge, p.cannot_link), ("companion", "companion", None))
+        for key in ((5, 6), (7, 8), (11, 12), (13, 14)):
+            self.assertIsNone(state.pairs[key].terminal)
+        self.assertEqual(sorted((e.type, e.a, e.b) for e in state.edges),
+                         [("companion", 1, 2), ("companion", 3, 4), ("companion", 9, 10)])
+
+    def test_earlier_terminal_decisions_are_kept(self):
+        for earlier, edge in (("copy_of", "copy_of"), ("template_slot_conflict", None)):
+            with self.subTest(earlier=earlier):
+                c, state = self.build()
+                sb.apply_copy_of(state)
+                sb.apply_slot_conflict(state)
+                pair = state.pairs[(1, 2)]
+                self.assertIsNone(pair.terminal)   # cannot arise naturally: types differ
+                pair.terminal, pair.edge = earlier, edge
+                sb.apply_companion(state)
+                self.assertEqual((pair.terminal, pair.edge), (earlier, edge))
+                self.assertNotIn((1, 2), {(e.a, e.b) for e in state.edges})
+
+    def test_idempotent(self):
+        c, state = self.run_s5()
+        before = (copy.deepcopy(state.pairs), list(state.edges))
+        sb.apply_companion(state)
+        self.assertEqual((state.pairs, state.edges), before)
+
+    def test_non_candidate_pair_gets_nothing(self):
+        c, state = self.run_s5(drop={(1, 2)})
+        self.assertNotIn((1, 2), state.pairs)
+        self.assertTrue(sb.companion_qualifies(state.articles[1], state.articles[2],
+                                               cand.pair_signals(state.model.features, 1, 2).cosine,
+                                               state.model))
+        self.assertNotIn((1, 2), {(e.a, e.b) for e in state.edges})
+
+    def test_article_id_permutation(self):
+        def by_url(c, state):
+            url = {a.id: a.normalized_url for a in c.articles}
+            return ({tuple(sorted((url[p.a], url[p.b]))): (p.terminal, p.edge)
+                     for p in state.pairs.values()},
+                    sorted(tuple(sorted((url[e.a], url[e.b]))) for e in state.edges))
+        permuted = tuple(random.Random(4).sample(range(1, 60), 18))
+        self.assertEqual(by_url(*self.run_s5()), by_url(*self.run_s5(permuted)))
+
+    def test_container_companion_is_terminal_without_edge(self):
+        rows = [gov(1, "alpha-unit", REL, "Funding for Zeta harbour upgrade",
+                    "Harbour works cost $20 million."),
+                gov(2, "alpha-unit", BKG, "Zeta harbour upgrade details",
+                    "The $20 million harbour works.", path="live"),
+                *fillers(100)]
+        c, model = self.load(rows)
+        self.assertTrue(next(a for a in c.articles if a.id == 2).container_flag)
+        artifact = json.loads(predict.canonical_json(predict.stage_a_artifact(c)))
+        state = sb.StageBState(c, model, sb.validate_candidate_artifact(artifact, c, model))
+        self.assertIn((1, 2), state.pairs)
+        sb.apply_companion(state)
+        pair = state.pairs[(1, 2)]
+        self.assertEqual((pair.terminal, pair.edge, pair.cannot_link), ("companion", None, None))
+        self.assertEqual(state.edges, [])
 
 
 if __name__ == "__main__":
