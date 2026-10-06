@@ -839,6 +839,44 @@ container principle, not from observed Stage B performance:
   identified containers carry no document type; that observation is not the
   reason for the rule and is not encoded as a corpus-specific exception.
 
+Implementation clarifications, discovered during the read-only S5 step 4
+(advisory) implementation review after checkpoint
+`c339ac6ffa85cf70ebd324038cee4df1b5f608ab`, before any advisory code, real
+Stage B prediction or gold evaluation; not chosen from observed Stage B
+performance:
+
+- **C17 — Advisory anchor counting.** Anchors are counted by type, not by
+  matching instance. The four types are: shared distinctive number; shared
+  rare three-token sequence; full-vector cosine ≥ `ADVISORY_MIN_COSINE`;
+  shared title entity span. Each type contributes at most one anchor toward
+  `ADVISORY_MIN_ANCHORS`, however many instances match: several shared
+  distinctive numbers give one number anchor; several shared rare sequences,
+  including overlapping trigrams from one longer phrase, give one sequence
+  anchor; cosine gives zero or one; one or many shared entity spans give at most
+  one entity anchor, and excess entity matches are ignored for counting, not
+  disqualifying. A shared span that legitimately meets both the rare-sequence
+  and the entity definitions satisfies those two distinct types. Hence
+  `ADVISORY_MIN_ANCHORS = 2` requires evidence of at least two distinct types.
+  This is a conservative reading of the frozen enumeration of advisory
+  evidence: repeated or overlapping instances of one evidence form do not
+  become multiple independent anchors. The rare-sequence, DF, cosine, entity
+  and number definitions are unchanged.
+- **C18 — Advisory pairs involving a container.** Advisory qualification and
+  multiplicity apply normally to a sealed candidate pair involving a
+  container; a qualifying container pair takes part in the same
+  advisory-to-document multiplicity calculation as any other qualifying pair.
+  After multiplicity is resolved, a uniquely matched container pair receives
+  the terminal advisory same-event decision but, consistent with C9 and C16, no
+  advisory clustering edge; an ambiguous one receives the same terminal
+  advisory abstention (`unresolved`) as an ordinary pair, with no edge and no
+  cannot-link. Advisory therefore never gives a container event membership
+  directly; S8 remains the only membership route for containers. A uniquely
+  matched pair of two non-containers keeps its structural advisory edge.
+  Candidate-boundedness (C1) is unchanged. In the frozen Run 1 corpus this
+  branch is expected to be unreachable because the identified containers have
+  no issuing unit or document type; that observation is not the reason for the
+  rule and is not encoded as a corpus-specific exception.
+
 **Provenance.** The Stage B prediction artifact records the frozen corpus,
 candidate-artifact and Stage A configuration identities and a Stage B
 specification/configuration hash. It does not need to contain the commit hash
