@@ -1,0 +1,113 @@
+{
+  "format": "atlas-signal/corpus-manifest",
+  "format_version": 1,
+  "title": "Experiment 001 Run 4 frozen corpus snapshot",
+  "created_on": "2026-10-06",
+  "approved_by": "Jeff",
+  "content_note": "Metadata only. This file contains no publisher text, titles, summaries, URLs or feed entries.",
+  "snapshot": {
+    "path": "data/snapshots/experiment-001-run4.sqlite3",
+    "path_convention": "data/snapshots/<experiment>-run<N>.sqlite3: a local, untracked, read-only copy of an experiment database frozen after run N",
+    "tracked_by_git": false,
+    "ignored_by": ".gitignore rule 'data/'",
+    "sha256": "5bb7742f07dfcc495cb050414ae6c7a74b0f546e8578b9aff9c89ccfbe689dfd",
+    "size_bytes": 2801664,
+    "os_read_only": true,
+    "source_database": "data/experiment-001.sqlite3"
+  },
+  "creation": {
+    "method": "Byte-for-byte file copy (Python shutil.copyfile) of the live database; SQLite was not used to open or write either file during the copy.",
+    "preconditions_confirmed": [
+      "No collector or Python process running",
+      "No SQLite -journal, -wal or -shm sidecar beside the live database",
+      "Live database SHA-256 equal to the gold corpus hash before copying",
+      "Live counts 6 sources / 4 runs / 24 fetches / 177 articles / 620 sightings / 0 entry errors (read with mode=ro&immutable=1)"
+    ],
+    "live_sha256_before_copy": "5bb7742f07dfcc495cb050414ae6c7a74b0f546e8578b9aff9c89ccfbe689dfd",
+    "live_sha256_after_copy": "5bb7742f07dfcc495cb050414ae6c7a74b0f546e8578b9aff9c89ccfbe689dfd",
+    "post_copy": "Snapshot marked read-only with the Windows read-only attribute (attrib +R)."
+  },
+  "sqlite": {
+    "header_library_version": "3.50.4",
+    "page_size": 4096,
+    "page_count": 684,
+    "freelist_count": 0,
+    "encoding": "UTF-8",
+    "journal_mode": "delete",
+    "user_version": 1,
+    "schema_version_meaning": "atlas_signal.db.SCHEMA_VERSION = 1",
+    "tables": ["sources", "runs", "fetches", "articles", "sightings", "entry_errors"],
+    "indexes": ["sightings_article", "sightings_source_guid"]
+  },
+  "run4_boundary": {
+    "definition": "finished_at of run 4, the last completed run; no collection timestamp in the snapshot is later than this.",
+    "timestamp_utc": "2026-10-05T07:08:07Z",
+    "runs": [
+      {"id": 1, "started_at": "2026-10-05T02:44:02Z", "finished_at": "2026-10-05T02:44:34Z", "status": "completed_with_errors", "app_version": "0.1.0"},
+      {"id": 2, "started_at": "2026-10-05T02:49:55Z", "finished_at": "2026-10-05T02:50:26Z", "status": "completed_with_errors", "app_version": "0.1.0"},
+      {"id": 3, "started_at": "2026-10-05T02:57:30Z", "finished_at": "2026-10-05T02:58:01Z", "status": "completed_with_errors", "app_version": "0.1.0"},
+      {"id": 4, "started_at": "2026-10-05T07:07:34Z", "finished_at": "2026-10-05T07:08:07Z", "status": "completed_with_errors", "app_version": "0.1.0"}
+    ]
+  },
+  "table_counts": {
+    "sources": 6,
+    "runs": 4,
+    "fetches": 24,
+    "articles": 177,
+    "sightings": 620,
+    "entry_errors": 0
+  },
+  "id_ranges": {
+    "runs": [1, 4],
+    "fetches": [1, 24],
+    "articles": [1, 177],
+    "sightings": [1, 620],
+    "entry_errors": null
+  },
+  "source_ids": ["bbc-business", "cbc-business", "ec-press", "gc-news", "guardian-business", "guardian-economics"],
+  "gold_encoding": {
+    "file": "docs/research/event-relationship-gold.json",
+    "relationship": "The gold file's corpus.sha256_at_encoding equals this snapshot's SHA-256, so this snapshot is the exact database its article IDs refer to. The gold file was not modified when the snapshot was made.",
+    "corpus_sha256_in_gold": "5bb7742f07dfcc495cb050414ae6c7a74b0f546e8578b9aff9c89ccfbe689dfd",
+    "gold_file_sha256_at_freeze": "55e1ce1a2d9f8c59aa2c24660218aa51c32a606a5cfe5796f7f2be2890055cd2",
+    "gold_file_commit_at_freeze": "fcd9ed8",
+    "distinct_article_ids_referenced": 74,
+    "referenced_article_ids_missing_from_snapshot": 0
+  },
+  "validation": {
+    "performed_on": "2026-10-06",
+    "access_mode": "All SQLite access to the snapshot used URI mode=ro&immutable=1.",
+    "environment": {"python": "3.14.6", "sqlite_library": "3.50.4"},
+    "snapshot_sha256_equals_live_and_gold": true,
+    "integrity_check": "ok",
+    "foreign_key_check_failures": 0,
+    "user_version": 1,
+    "table_counts_match_expected": true,
+    "article_ids_exactly_1_to_177": true,
+    "run_ids_exactly_1_to_4": true,
+    "unfinished_runs": 0,
+    "fetches_with_run_id_above_4": 0,
+    "sightings_referencing_missing_fetch": 0,
+    "sightings_referencing_missing_article": 0,
+    "collection_timestamps_after_boundary": 0,
+    "collection_timestamp_columns_checked": [
+      "sources.first_added_at", "sources.updated_at",
+      "runs.started_at", "runs.finished_at",
+      "fetches.started_at", "fetches.finished_at",
+      "articles.first_seen_at", "articles.last_seen_at",
+      "sightings.seen_at"
+    ],
+    "publisher_dates_after_boundary": {"articles.published_at": 0, "articles.updated_at": 0},
+    "gold_article_ids_present": "74 of 74",
+    "ATLAS_GOLD_CHECK_DB_test": "tests.test_event_relationship_gold OptionalDatabaseTextTests passed against the snapshot",
+    "offline_test_suite": "303 tests passed with the project virtual environment (1 skipped without ATLAS_GOLD_CHECK_DB; 0 skipped with it set to the snapshot)",
+    "ignored_by_git": true
+  },
+  "rights_and_reproducibility": {
+    "untracked_by_design": "The SQLite snapshot is intentionally not tracked by Git because it contains stored publisher and feed evidence (titles, summaries, raw feed entries).",
+    "not_independently_reproducible": "This manifest identifies the snapshot but does not make the corpus reproducible without possession of the snapshot file. Feeds change over time, so re-running collection would not recreate it.",
+    "loss_consequence": "Losing the snapshot means losing the exact Run 4 evidence that the gold encoding's article IDs refer to.",
+    "backup": "A future private backup of the snapshot may be appropriate; it is outside the scope of this freeze and has not been made.",
+    "verification": "Anyone holding a candidate copy can confirm its identity by comparing its SHA-256 with snapshot.sha256."
+  }
+}

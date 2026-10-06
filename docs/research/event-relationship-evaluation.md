@@ -204,6 +204,10 @@ holds 68 pair labels (15 from Pass 1, 53 from Pass 2), and only Jeff's
 judgments: Claude's labels are not part of it. Its limitations are listed in the
 file itself.
 
+The Run 4 database those article IDs refer to was frozen on 2026-10-06 as a
+local, untracked, read-only snapshot. Its identity and validation are recorded
+in [experiment-001-run4-corpus-manifest.json](experiment-001-run4-corpus-manifest.json).
+
 ## Recommended next step
 
 A small, scratch-only baseline, using stored feed evidence only, that:
