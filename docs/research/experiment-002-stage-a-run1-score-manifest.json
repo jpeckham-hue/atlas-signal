@@ -1,0 +1,55 @@
+{
+  "format": "atlas-signal/e002-stage-a-score-manifest",
+  "format_version": 1,
+  "experiment": "002",
+  "stage": "A",
+  "run": "run1",
+  "evaluated_at_utc": "2026-10-06T04:16:43Z",
+  "predictor_commit": "55179691d02fce47311128298338513e9b432114",
+  "scorer_commit": "2a4fae020c50e03740900b3e377f2c1f4fc2e879",
+  "design_commit": "1592ca8e6b6fbe810e928438d9d37ac5a999e200",
+  "corpus_sha256": "5bb7742f07dfcc495cb050414ae6c7a74b0f546e8578b9aff9c89ccfbe689dfd",
+  "gold": {
+    "path": "docs/research/event-relationship-gold.json",
+    "sha256": "55e1ce1a2d9f8c59aa2c24660218aa51c32a606a5cfe5796f7f2be2890055cd2"
+  },
+  "candidate_artifact": {
+    "path": "data/experiments/e002-stage-a-run1-candidates.json",
+    "sha256": "0e319d718b35c0411c3024782d92de44900914a59e5096fef149fe0c3f3eb8a2"
+  },
+  "score_artifact": {
+    "path": "data/experiments/e002-stage-a-run1-score.json",
+    "sha256": "9c0a281fea503c8ab78a302c8cb9fb9852ac2cd9befc7cf12d1b6ef1a429fe92",
+    "size_bytes": 21986,
+    "tracked_by_git": false
+  },
+  "configuration_sha256": "225540a47ead4b884676b268dfd233b1b09cd2c6c8f48d383d0adf1ecabb605e",
+  "results": {
+    "primary_unit": "all unique gold pairs across Pass 1 and Pass 2",
+    "candidate_pool": {"candidate_count": 485, "pair_count_total": 15576, "fraction": "485/15576", "percent": "3.1138"},
+    "positives": {"count": 31, "surfaced": 30, "recall_fraction": "30/31", "recall_percent": "96.7742"},
+    "positives_by_label": {
+      "copy_of": "1/1",
+      "same_event": "23/24",
+      "linked": "6/6"
+    },
+    "hard_negatives": {
+      "count": 28,
+      "in_pool": 23,
+      "rate_fraction": "23/28",
+      "rate_percent": "82.1429",
+      "by_kind": {"distinct": "18/21", "unresolved_not_same_event": "5/7"}
+    },
+    "excluded": {"unresolved_unconstrained": 1, "not_scored": 4},
+    "criteria": {
+      "recall_at_least_90_percent": true,
+      "pool_at_most_5_percent": true,
+      "stage_a_passed": true
+    }
+  },
+  "statements": [
+    "This was the first evaluation of the sealed Stage A Run 1 candidate artifact against the human gold. The scorer was run exactly once.",
+    "The score artifact was sealed before any failure diagnosis, threshold analysis or counterfactual analysis.",
+    "This manifest contains metadata and aggregate results only: no publisher text."
+  ]
+}
