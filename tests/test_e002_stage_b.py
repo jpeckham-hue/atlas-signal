@@ -644,5 +644,249 @@ class CompanionStateTests(CompanionFixture):
         self.assertEqual(state.edges, [])
 
 
+# --- S5 step 4: advisory match ---------------------------------------------------
+
+ADV = "media advisories"
+BOILER_GOV = "Media may attend and should register in advance with the press office before the event."
+
+
+def adv_gov(i, unit, doc_type, title, summary, day=10, hour=10, minute=0, second=0, path="news",
+            tag=""):
+    slug = "-".join(title.lower().split()) + tag
+    return article(i, source="gov-b", url=f"https://www.canada.ca/en/{unit}/{path}/{slug}.html",
+                   title=title, summary=summary, date_status="updated_only", published_at=None,
+                   updated_at=f"2026-01-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}Z",
+                   sightings=((None, [doc_type]),) if doc_type else ((None, None),))
+
+
+class AdvisoryRuleTests(Fixture):
+    """Predicate-level tests; the cosine is passed explicitly to isolate anchor types."""
+
+    def setUp(self):
+        super().setUp()
+        u = "anchor-unit"
+        rows = [
+            adv_gov(1, u, ADV, "Minister Doe to announce Zeta Harbour and Orchard Valley funding",
+                    "Minister Doe will announce $21 million and $35 million for the orchard "
+                    "irrigation scheme expansion near the harvest of plums at valley 2026 tonnes."),
+            # numbers only (two shared distinctive amounts)
+            adv_gov(2, u, REL, "Funding confirmed", "Grants of $21 million and $35 million.", hour=11),
+            # overlapping rare trigrams only: "orchard irrigation scheme expansion"
+            adv_gov(3, u, REL, "Works begin", "The orchard irrigation scheme expansion starts.", hour=11),
+            # two shared entities only
+            adv_gov(4, u, REL, "Zeta Harbour and Orchard Valley projects", "Projects proceed.", hour=11),
+            # stopword trigram and number trigram only
+            adv_gov(5, u, REL, "Valley update", "The harvest of plums at valley 2026 tonnes.", hour=11),
+            # entity span that is also a rare trigram
+            adv_gov(6, u, ADV, "Officials to visit Glacier Point Lighthouse", "A visit is planned."),
+            adv_gov(7, u, REL, "Repairs at Glacier Point Lighthouse completed", "Repairs done.", hour=11),
+            # title/summary boundary and cross-sentence summary
+            adv_gov(8, "other-unit", REL, "Alpha Beta", "Gamma delta"),
+            adv_gov(9, "other-unit", REL, "Note", "The orchard closed. Irrigation scheme restarted."),
+            # unsuppressed boilerplate (repeated sentence)
+            adv_gov(10, "board-unit", ADV, "Board meeting notice", BOILER_GOV),
+            adv_gov(11, "board-unit", REL, "Board meeting held", BOILER_GOV, hour=11),
+            # DF of "copper kettle festival": 5 articles, and "silver kettle festival": 6
+            *[adv_gov(20 + k, "df-unit", REL, f"Item {k}", "The copper kettle festival returns.")
+              for k in range(5)],
+            *[adv_gov(30 + k, "df-unit", REL, f"Entry {k}", "The silver kettle festival returns.")
+              for k in range(6)],
+            *fillers(100),
+        ]
+        self.c, self.model = self.load(rows)
+        self.arts = {a.id: a for a in self.c.articles}
+        self.seqs = sb.rare_sequences(self.c.articles)
+
+    def types(self, x, y, cos=0.0):
+        return sb.advisory_anchor_types(self.arts[x], self.arts[y], cos, self.model, self.seqs)
+
+    def qualifies(self, x, y, cos=0.0):
+        return sb.advisory_qualifies(self.arts[x], self.arts[y], cos, self.model, self.seqs)
+
+    def test_multiple_numbers_are_one_type(self):
+        self.assertEqual(self.types(1, 2), {"number"})
+        self.assertFalse(self.qualifies(1, 2))                 # one type alone fails
+        self.assertTrue(self.qualifies(1, 2, cos=0.3))         # number + cosine
+
+    def test_overlapping_trigrams_are_one_type(self):
+        shared = self.seqs[1] & self.seqs[3]
+        self.assertEqual(shared, {("orchard", "irrigation", "scheme"),
+                                  ("irrigation", "scheme", "expansion")})
+        self.assertEqual(self.types(1, 3), {"sequence"})
+        self.assertFalse(self.qualifies(1, 3))
+
+    def test_entities_are_one_type_and_capped(self):
+        f = {x.id: x for x in self.model.features}
+        self.assertEqual(f[1].entities & f[4].entities, {"zeta harbour", "orchard valley"})
+        self.assertEqual(self.types(1, 4), {"entity"})
+        self.assertFalse(self.qualifies(1, 4))                 # two entities alone fail
+        self.assertTrue(self.qualifies(1, 4, cos=0.3))         # entity + cosine; not disqualified
+
+    def test_entity_and_sequence_from_one_span(self):
+        self.assertEqual(self.types(6, 7), {"entity", "sequence"})
+        self.assertTrue(self.qualifies(6, 7))
+
+    def test_cosine_boundary(self):
+        self.assertTrue(self.qualifies(1, 4, cos=0.25))
+        self.assertFalse(self.qualifies(1, 4, cos=math.nextafter(0.25, 0.0)))
+
+    def test_trigram_eligibility(self):
+        self.assertNotIn(("harvest", "of", "plums"), self.seqs[5])        # stopword
+        self.assertFalse(any("2026" in t for t in self.seqs[5]))           # number expression
+        self.assertEqual(self.types(1, 5), frozenset())
+        self.assertEqual(self.seqs[8], frozenset())                       # no title->summary trigram
+        self.assertIn(("closed", "irrigation", "scheme"), self.seqs[9])   # crosses sentences
+
+    def test_unsuppressed_boilerplate_is_eligible(self):
+        key = text_sentence_key(BOILER_GOV)
+        self.assertIn(key, self.model.boilerplate["gov-b"])               # suppressed in vectors
+        self.assertIn(("media", "may", "attend"), self.seqs[10])       # but used for sequences
+        self.assertIn("sequence", self.types(10, 11))
+
+    def test_df_boundary(self):
+        self.assertIn(("copper", "kettle", "festival"), self.seqs[20])    # DF 5
+        self.assertNotIn(("silver", "kettle", "festival"), self.seqs[30]) # DF 6
+
+    def test_roles_time_and_unit(self):
+        def roles(adv_kw, doc_kw):
+            rows = [adv_gov(1, "u", ADV, "Zeta Harbour event", "Funds of $21 million.", **adv_kw),
+                    adv_gov(2, doc_kw.pop("unit", "u"), doc_kw.pop("doc_type", REL),
+                            "Zeta Harbour event held", "Funds of $21 million.", **doc_kw),
+                    *fillers(100)]
+            c, model = self.load(rows)
+            arts = {a.id: a for a in c.articles}
+            return sb.advisory_roles(arts[1], arts[2])
+        start = dict(day=10, hour=10)
+        self.assertIsNotNone(roles(start, dict(day=17, hour=10)))           # exactly 7 days
+        self.assertIsNone(roles(start, dict(day=17, hour=10, second=1)))    # 7 days + 1 s
+        self.assertIsNone(roles(start, dict(day=10, hour=10)))              # equal time
+        self.assertIsNone(roles(start, dict(day=9, hour=10)))               # document earlier
+        self.assertIsNone(roles(start, dict(day=10, hour=11, unit="v")))    # different unit
+        self.assertIsNone(roles(start, dict(day=10, hour=11, doc_type=ADV)))  # two advisories
+        self.assertIsNotNone(roles(start, dict(day=10, hour=11, doc_type=None)))  # untyped document
+        rows = [article(1, title="Zeta Harbour event", summary="Funds of $21 million.",
+                        sightings=((None, [ADV]),)),
+                article(2, title="Zeta Harbour event held", summary="Funds of $21 million.",
+                        published_at="2026-01-10T13:00:00Z"), *fillers(100)]
+        c, _ = self.load(rows)
+        arts = {a.id: a for a in c.articles}
+        self.assertIsNone(sb.advisory_roles(arts[1], arts[2]))             # no issuing unit
+
+
+def text_sentence_key(sentence):
+    from research.e002.text import sentence_key
+    return sentence_key(sentence)
+
+
+def advisory_rows(ids=tuple(range(1, 20))):
+    i = iter(ids)
+    position = iter(range(100))  # row position, stable under ID permutation
+
+    def pair_doc(unit, name, amount, hour, path="news", doc_type=REL):
+        return adv_gov(next(i), unit, doc_type, f"{name} event held", f"Grants of {amount}.",
+                       hour=hour, path=path, tag=f"-{next(position)}")
+
+    def advisory(unit, name, amount):
+        return adv_gov(next(i), unit, ADV, f"{name} event planned", f"Grants of {amount}.",
+                       tag=f"-{next(position)}")
+    return [
+        # unit u: advisory with two qualifying documents and one non-qualifying sibling
+        advisory("u-unit", "Zeta Harbour", "$21 million"),                     # 1
+        pair_doc("u-unit", "Zeta Harbour", "$21 million", 11),                  # 2
+        pair_doc("u-unit", "Zeta Harbour", "$21 million", 12),                  # 3
+        adv_gov(next(i), "u-unit", REL, "Unrelated depot opening", "A depot opens.", hour=13),  # 4
+        # unit v: one document, two advisories
+        advisory("v-unit", "Orchard Valley", "$22 million"),                    # 5
+        advisory("v-unit", "Orchard Valley", "$22 million"),                    # 6
+        pair_doc("v-unit", "Orchard Valley", "$22 million", 11),                # 7
+        # unit w: unique match
+        advisory("w-unit", "Glacier Point", "$23 million"),                     # 8
+        pair_doc("w-unit", "Glacier Point", "$23 million", 11),                 # 9
+        # unit x: unique match with a container document
+        advisory("x-unit", "Copper Kettle", "$24 million"),                     # 10
+        pair_doc("x-unit", "Copper Kettle", "$24 million", 11, path="live", doc_type=None),  # 11
+        # unit y: container and ordinary document both qualify for one advisory
+        advisory("y-unit", "Silver Bridge", "$25 million"),                     # 12
+        pair_doc("y-unit", "Silver Bridge", "$25 million", 11, path="live", doc_type=None),  # 13
+        pair_doc("y-unit", "Silver Bridge", "$25 million", 12),                 # 14
+        # unit z: chain A1-D1, A2-D1, A2-D2
+        advisory("z-unit", "Amber Gate", "$26 million"),                        # 15
+        advisory("z-unit", "Amber Gate", "$27 million"),                        # 16
+        adv_gov(next(i), "z-unit", REL, "Amber Gate event held",
+                "Grants of $26 million and $27 million.", hour=11),             # 17
+        pair_doc("z-unit", "Amber Gate", "$27 million", 12),                    # 18
+        pair_doc("w-unit", "Glacier Point", "$23 million", 9),                  # 19: before advisory
+        *fillers(100),
+    ]
+
+
+class AdvisoryStateTests(Fixture):
+    def build(self, ids=tuple(range(1, 20)), drop=()):
+        c, model = self.load(advisory_rows(ids))
+        artifact = json.loads(predict.canonical_json(predict.stage_a_artifact(c)))
+        artifact["candidates"] = [r for r in artifact["candidates"] if (r["a"], r["b"]) not in drop]
+        artifact["candidate_count"] = len(artifact["candidates"])
+        return c, sb.StageBState(c, model, sb.validate_candidate_artifact(artifact, c, model))
+
+    def run_s5(self, ids=tuple(range(1, 20)), drop=()):
+        c, state = self.build(ids, drop)
+        for step in (sb.apply_copy_of, sb.apply_slot_conflict, sb.apply_companion, sb.apply_advisory):
+            step(state)
+        return c, state
+
+    def outcome(self, state, x, y):
+        p = state.pairs[(min(x, y), max(x, y))]
+        return (p.terminal, p.edge, p.cannot_link)
+
+    def test_preconditions(self):
+        c, state = self.build()
+        for key in ((1, 2), (1, 3), (1, 4), (5, 7), (6, 7), (8, 9), (10, 11), (12, 13), (12, 14),
+                    (15, 17), (16, 17), (16, 18), (8, 19)):
+            self.assertIn(key, state.pairs)
+        arts = state.articles
+        self.assertTrue(arts[11].container_flag and arts[13].container_flag)
+
+    def test_multiplicity_and_unique_matches(self):
+        c, state = self.run_s5()
+        abstain = ("advisory_abstain", None, None)
+        for key in ((1, 2), (1, 3), (5, 7), (6, 7), (12, 13), (12, 14), (15, 17), (16, 17), (16, 18)):
+            with self.subTest(pair=key):
+                self.assertEqual(self.outcome(state, *key), abstain)
+        self.assertEqual(self.outcome(state, 1, 4), (None, None, None))     # non-qualifying sibling
+        self.assertEqual(self.outcome(state, 8, 9), ("advisory", "advisory", None))
+        self.assertEqual(self.outcome(state, 10, 11), ("advisory", None, None))  # container (C18)
+        self.assertEqual(self.outcome(state, 8, 19), (None, None, None))    # document earlier
+        self.assertEqual([(e.type, e.a, e.b) for e in state.edges], [("advisory", 8, 9)])
+
+    def test_earlier_terminal_pair_is_skipped_and_not_counted(self):
+        c, state = self.build()
+        for step in (sb.apply_copy_of, sb.apply_slot_conflict, sb.apply_companion):
+            step(state)
+        state.pairs[(1, 2)].terminal = "copy_of"      # preset: H1 must hold generically
+        sb.apply_advisory(state)
+        self.assertEqual(self.outcome(state, 1, 2), ("copy_of", None, None))
+        self.assertEqual(self.outcome(state, 1, 3), ("advisory", "advisory", None))
+
+    def test_idempotent(self):
+        c, state = self.run_s5()
+        before = (copy.deepcopy(state.pairs), list(state.edges))
+        sb.apply_advisory(state)
+        self.assertEqual((state.pairs, state.edges), before)
+
+    def test_non_candidate_pair_gets_nothing(self):
+        c, state = self.run_s5(drop={(8, 9)})
+        self.assertNotIn((8, 9), state.pairs)
+        self.assertEqual(state.edges, [])
+
+    def test_order_and_article_id_permutation(self):
+        def by_url(c, state):
+            url = {a.id: a.normalized_url for a in c.articles}
+            return ({tuple(sorted((url[p.a], url[p.b]))): (p.terminal, p.edge)
+                     for p in state.pairs.values()},
+                    sorted(tuple(sorted((url[e.a], url[e.b]))) for e in state.edges))
+        permuted = tuple(random.Random(6).sample(range(1, 80), 19))
+        self.assertEqual(by_url(*self.run_s5()), by_url(*self.run_s5(permuted)))
+
+
 if __name__ == "__main__":
     unittest.main()
