@@ -52,7 +52,8 @@ def code_strings_and_names(tree):
 class StaticLeakageTests(unittest.TestCase):
     def test_predictor_modules_exist(self):
         names = {p.stem for p in predictor_files()}
-        self.assertTrue({"__init__", "candidates", "corpus", "predict", "rules", "text"} <= names)
+        self.assertTrue({"__init__", "candidates", "corpus", "predict", "rules", "stage_b",
+                         "text"} <= names)
 
     def test_no_reference_to_gold_scorer_or_evaluation(self):
         for path in predictor_files():
@@ -63,7 +64,7 @@ class StaticLeakageTests(unittest.TestCase):
                         self.assertNotIn(word, item.casefold())
 
     def test_only_allowed_imports(self):
-        allowed_local = {"rules", "text", "corpus", "candidates"}
+        allowed_local = {"rules", "text", "corpus", "candidates", "predict"}
         for path in predictor_files():
             tree = ast.parse(path.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
@@ -138,6 +139,52 @@ class StageALeakageTests(unittest.TestCase):
             self.assertEqual({Path(p).resolve() for p in opened}, {db.resolve(), out.resolve()})
             imported = set(sys.modules) - before
             self.assertIn("research.e002.predict", imported)
+            self.assertFalse([m for m in imported if "score" in m or "gold" in m])
+
+
+class StageBLeakageTests(unittest.TestCase):
+    def test_stage_b_loader_opens_only_corpus_and_candidate_artifact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            rows = [article(i, url=f"https://example.test/n/{i}", title=f"Acme plant {i}",
+                            summary="A \u00a37m plan.") for i in (1, 2)]
+            db = build_db(tmp / "c.sqlite3", rows)
+            saved = {m: sys.modules.pop(m) for m in list(sys.modules)
+                     if m.startswith("research.e002")}
+            self.addCleanup(sys.modules.update, saved)
+            before = set(sys.modules)
+            opened = []
+            real_open = builtins.open
+
+            def guarded_open(file, *args, **kwargs):
+                opened.append(str(file))
+                if "gold" in str(file).casefold():
+                    raise FileNotFoundError(file)
+                return real_open(file, *args, **kwargs)
+
+            corpus_mod = importlib.import_module("research.e002.corpus")
+            predict_mod = importlib.import_module("research.e002.predict")
+            c = corpus_mod.load_corpus(db, expected_sha256=corpus_mod.file_sha256(db))
+            artifact_path = tmp / "candidates.json"
+            artifact_path.write_text(predict_mod.canonical_json(predict_mod.stage_a_artifact(c)),
+                                     encoding="utf-8")
+            sha = corpus_mod.file_sha256(artifact_path)
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with mock.patch.object(builtins, "open", guarded_open), \
+                        mock.patch.object(io, "open", guarded_open):
+                    stage_b = importlib.import_module("research.e002.stage_b")
+                    candidates_mod = importlib.import_module("research.e002.candidates")
+                    c = corpus_mod.load_corpus(db, expected_sha256=corpus_mod.file_sha256(db))
+                    model = candidates_mod.corpus_model(c.articles)
+                    stage_b.load_candidate_artifact(artifact_path, sha, c, model)
+            finally:
+                os.chdir(cwd)
+            self.assertEqual({Path(p).resolve() for p in opened},
+                             {db.resolve(), artifact_path.resolve()})
+            imported = set(sys.modules) - before
+            self.assertIn("research.e002.stage_b", imported)
             self.assertFalse([m for m in imported if "score" in m or "gold" in m])
 
 
