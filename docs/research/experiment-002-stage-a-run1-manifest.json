@@ -1,0 +1,31 @@
+{
+  "format": "atlas-signal/e002-stage-a-run-manifest",
+  "format_version": 1,
+  "experiment": "002",
+  "stage": "A",
+  "run": "run1",
+  "executed_at_utc": "2026-10-06T03:50:42Z",
+  "predictor_commit": "55179691d02fce47311128298338513e9b432114",
+  "design_commit": "1592ca8e6b6fbe810e928438d9d37ac5a999e200",
+  "corpus": {
+    "path": "data/snapshots/experiment-001-run4.sqlite3",
+    "sha256": "5bb7742f07dfcc495cb050414ae6c7a74b0f546e8578b9aff9c89ccfbe689dfd"
+  },
+  "candidate_artifact": {
+    "path": "data/experiments/e002-stage-a-run1-candidates.json",
+    "sha256": "0e319d718b35c0411c3024782d92de44900914a59e5096fef149fe0c3f3eb8a2",
+    "size_bytes": 153825,
+    "tracked_by_git": false
+  },
+  "configuration_sha256": "225540a47ead4b884676b268dfd233b1b09cd2c6c8f48d383d0adf1ecabb605e",
+  "article_count": 177,
+  "pair_count_total": 15576,
+  "candidate_count": 485,
+  "candidate_percentage": "3.1138",
+  "candidate_fraction": "485/15576",
+  "statements": [
+    "This was the first execution of Experiment 002 Stage A candidate generation against the real frozen corpus. The predictor was run exactly once.",
+    "No gold evaluation had occurred when the candidate artifact was sealed: the gold was not read, and no candidate recall, hard-negative coverage or other gold comparison had been calculated.",
+    "This manifest contains metadata only: no publisher text, candidate pair contents or gold labels."
+  ]
+}
