@@ -183,6 +183,30 @@ def strip_plural(word: str) -> str:
     return result if len(result) >= rules.PLURAL_MIN_STEM else word
 
 
+def aligned_tokens(text: str | None) -> list[tuple[str, str | None]]:
+    """``(raw token, content token or None)`` pairs in order.
+
+    The raw tokens equal ``raw_tokens(text)`` and the non-None content tokens
+    equal ``tokenize(text)``. Lets token-level suppression found on raw tokens
+    be applied to content tokens.
+    """
+    text = normalize_text(text)
+    pairs: list[tuple[str, str | None]] = []
+    pos = 0
+
+    def words(segment: str) -> None:
+        for w in _WORD.findall(segment):
+            content = None if w in rules.STOPWORDS or w.isdigit() else strip_plural(w)
+            pairs.append((w, content))
+
+    for m, amount in _number_matches(text):
+        words(text[pos:m.start()])
+        pairs.append((re.sub(r"\s+", "", m.group(0)), amount.key if amount else None))
+        pos = m.end()
+    words(text[pos:])
+    return pairs
+
+
 def tokenize(text: str | None) -> list[str]:
     """Content tokens in order: words and amount keys.
 

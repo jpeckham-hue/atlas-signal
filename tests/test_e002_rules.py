@@ -72,6 +72,12 @@ class FrozenConfigurationTests(unittest.TestCase):
     def test_corpus_hash_matches_design(self):
         self.assertIn(rules.CORPUS_SHA256, DESIGN.read_text(encoding="utf-8"))
 
+    def test_catch_all_categories_recorded_in_design(self):
+        text = DESIGN.read_text(encoding="utf-8")
+        for category in rules.CATCH_ALL_CATEGORIES:
+            self.assertIn(f"Run 1 catch-all categories: `{category}`", text)
+            self.assertIn(f"catch-all category for the `tag` signal is `{category}`", text)
+
     def test_run1_safety_settings(self):
         self.assertFalse(rules.PART_OF_ENABLED)
         self.assertNotIn("atlas_inferred", rules.FOLLOWS_FROM_BASIS)

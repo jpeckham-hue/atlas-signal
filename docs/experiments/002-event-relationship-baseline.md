@@ -185,6 +185,10 @@ A pair is a candidate if the representative times are at most
 | `tag` | a shared source category occurring in at most `CAND_TAG_MAX_DF` articles; document-type categories and catch-all categories excluded |
 | `issuer` | same issuing unit within `CAND_ISSUER_HOURS` |
 
+Run 1 catch-all categories: `POLICY_AREA=GENINFO` (whole category value,
+matched after trimming and casefolding; composite values listing other codes
+are not excluded).
+
 All signal values are stored per candidate. Candidate generation never assigns
 a relationship.
 
@@ -587,3 +591,12 @@ independent evidence. Ablations report each rule's contribution.
   described.
 - Any claim of generalisation requires evaluation on articles labelled after
   the relevant configuration was frozen.
+
+### Pre-measurement clarifications
+
+- 2026-10-06, after design commit `1592ca8` and before the first real Stage A
+  candidate run (no candidate count, recall or other Stage A result existed):
+  the Run 1 catch-all category for the `tag` signal is `POLICY_AREA=GENINFO`.
+  The approved proposal named EC `GENINFO` as excluded; this design kept the
+  concept but omitted the value. This is a specification clarification, not
+  tuning.

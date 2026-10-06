@@ -66,6 +66,10 @@ DOCUMENT_TYPES = (
 ISSUING_UNIT_DOMAIN = "canada.ca"
 ISSUING_UNIT_LANGUAGE_SEGMENTS = ("en", "fr")
 
+# Section 4: catch-all categories excluded from the tag signal (pre-measurement
+# clarification recorded in the design's "Freeze and versioning" section).
+CATCH_ALL_CATEGORIES = ("POLICY_AREA=GENINFO",)
+
 # Sections 1, 7 and 8: format classes from URL path segments, in precedence
 # order (the first class with a matching segment wins).
 FORMAT_URL_SEGMENTS = (

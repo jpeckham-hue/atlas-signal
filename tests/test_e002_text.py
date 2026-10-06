@@ -49,6 +49,22 @@ class TokenizationTests(unittest.TestCase):
         self.assertTrue(all(w.isalpha() and w.islower() for w in rules.STOPWORDS))
 
 
+class AlignedTokenTests(unittest.TestCase):
+    SAMPLES = [
+        "", "The Widget Factory is open for the Season",
+        "Widget sales of £2.5bn in 2026, up 4.2% and 40 per cent on 2 October 2026",
+        "G20 talks: Acme’s €5 m deal, 99 people, 100 staff, 9.30am, 4x4s",
+        "Daily News 02 / 10 / 2026 - companies' prices rise 7 thousand",
+    ]
+
+    def test_matches_raw_tokens_and_tokenize(self):
+        for sample in self.SAMPLES:
+            with self.subTest(sample=sample):
+                pairs = text.aligned_tokens(sample)
+                self.assertEqual([r for r, _ in pairs], text.raw_tokens(sample))
+                self.assertEqual([c for _, c in pairs if c is not None], text.tokenize(sample))
+
+
 class PluralTests(unittest.TestCase):
     def test_rules_and_minimum_stem(self):
         cases = {
