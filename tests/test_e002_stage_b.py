@@ -14,7 +14,7 @@ from pathlib import Path
 from research.e002 import candidates as cand
 from research.e002 import corpus, predict, rules
 from research.e002 import stage_b as sb
-from research.e002.text import char_trigrams, clean_text, jaccard
+from research.e002.text import char_trigrams, clean_text, compare_title_templates, jaccard
 from tests.e002_support import article, build_db
 
 # Characters outside the ASCII fixtures; each appended one adds one new trigram.
@@ -314,6 +314,162 @@ class CopyOfStateTests(StateFixture):
         first = by_url(*self.run_copy((1, 2, 3, 4, 5, 6)))
         second = by_url(*self.run_copy((60, 7, 55, 9, 3, 41)))
         self.assertEqual(first, second)
+
+
+# --- S5 step 2: template slot conflict --------------------------------------------
+
+CARE_SUMMARY = "A resident died in care at the home this week, local officials said today."
+NOTICE_SUMMARY = ("Official notice about the regional widget programme, setting out the "
+                  "schedule, eligibility and contacts for applicants across the region.")
+
+
+class SlotConflictPrimitiveTests(Fixture):
+    def setUp(self):
+        super().setUp()
+        gov = dict(source="gov-b", date_status="updated_only", published_at=None,
+                   updated_at="2026-01-10T12:00:00Z")
+        titles = {
+            1: "Death of a resident at Northwind Home",
+            2: "Death of a resident at Barland House",
+            3: "Statement by Doe with Fooland leader",
+            4: "Statement by Roe with Fooland Doe",
+            5: "Minister Doe visits Fooland",
+            6: "Minister Roe tours Barland",
+            7: "Fund grants £5m to Northwind",
+            8: "Fund grants £7m to Northwind",
+            9: "Fund grants £5 m to Northwind",
+        }
+        rows = [article(i, url=f"https://example.test/news/{i}", title=t, summary="Note.")
+                for i, t in titles.items()]
+        rows += [
+            article(20, url="https://example.test/commentisfree/20", title=titles[2], summary="Note."),
+            article(21, source="gov-b", url="https://www.canada.ca/en/u/news/21.html",
+                    title=titles[2], summary="Note.", sightings=((None, ["news releases"]),),
+                    **{k: v for k, v in gov.items() if k != "source"}),
+            article(22, source="gov-b", url="https://www.canada.ca/en/u/news/22.html",
+                    title=titles[1], summary="Note.", sightings=((None, ["news releases"]),),
+                    **{k: v for k, v in gov.items() if k != "source"}),
+            article(23, source="gov-b", url="https://www.canada.ca/en/u/news/23.html",
+                    title=titles[1], summary="Note.", sightings=((None, ["backgrounders"]),),
+                    **{k: v for k, v in gov.items() if k != "source"}),
+            article(24, source="gov-b", url="https://www.canada.ca/en/u/news/24.html",
+                    title=titles[1], summary="Note.", sightings=((None, ["Topic"]),),
+                    **{k: v for k, v in gov.items() if k != "source"}),
+        ]
+        self.arts, _ = self.articles(rows)
+
+    def conflict(self, x, y):
+        return sb.slot_conflict(self.arts[x], self.arts[y])
+
+    def test_same_template_different_slots_conflict(self):
+        self.assertTrue(self.conflict(1, 2))
+        self.assertTrue(self.conflict(2, 1))
+        self.assertTrue(self.conflict(21, 22))  # gov-b, both news releases
+
+    def test_overlapping_slots_and_low_similarity_do_not_conflict(self):
+        self.assertFalse(self.conflict(3, 4))   # residual capitalized tokens overlap
+        self.assertFalse(self.conflict(5, 6))   # shared share 1/4 < 0.50
+        self.assertFalse(self.conflict(1, 1))   # identical title
+
+    def test_scope_must_match(self):
+        self.assertFalse(self.conflict(2, 21))   # different source
+        self.assertFalse(self.conflict(1, 20))   # same source, format standard vs opinion
+        self.assertFalse(self.conflict(21, 23))  # news releases vs backgrounders
+        self.assertFalse(self.conflict(21, 24))  # document type vs none
+
+    def test_amount_slots_follow_the_text_helper(self):
+        self.assertTrue(self.conflict(7, 8))     # £5m vs £7m
+        self.assertFalse(self.conflict(7, 9))    # £5m and £5 m are the same raw token
+        same_scope = [(x, y) for x in (1, 2, 3, 4, 5, 6, 7, 8, 9)
+                      for y in (1, 2, 3, 4, 5, 6, 7, 8, 9) if x < y]
+        for x, y in same_scope:
+            with self.subTest(pair=(x, y)):
+                self.assertEqual(self.conflict(x, y), compare_title_templates(
+                    self.arts[x].title, self.arts[y].title).slot_conflict)
+
+
+def slot_rows(ids=(1, 2, 3, 4, 5, 6, 7)):
+    s1, s2, s3, c1, c2, f1, f2 = ids
+    return [
+        article(s1, url="https://example.test/care/a", title="Death of a resident at Northwind Home",
+                summary=CARE_SUMMARY),
+        article(s2, url="https://example.test/care/b", title="Death of a resident at Barland House",
+                summary=CARE_SUMMARY, published_at="2026-01-10T13:00:00Z"),
+        # Same template, outside the 14-day gate: never a Stage A candidate.
+        article(s3, url="https://example.test/care/c", title="Death of a resident at Corland Lodge",
+                summary=CARE_SUMMARY, published_at="2026-02-20T12:00:00Z",
+                first_seen_at="2026-02-20T12:00:00Z"),
+        article(c1, url="https://example.test/notice/41",
+                title="Official notice about the regional widget programme report 41",
+                summary=NOTICE_SUMMARY),
+        article(c2, url="https://example.test/notice/42",
+                title="Official notice about the regional widget programme report 42",
+                summary=NOTICE_SUMMARY, published_at="2026-01-10T12:30:00Z"),
+        article(f1, url="https://example.test/news/f1", title="Acme expands Zeta widget plant",
+                summary=BASE_SUMMARY),
+        article(f2, url="https://example.test/news/f2",
+                title="Zeta widget plant expansion approved for Acme", summary=BASE_SUMMARY,
+                published_at="2026-01-10T14:00:00Z"),
+        *fillers(100),
+    ]
+
+
+class SlotConflictStateTests(Fixture):
+    def run_s5(self, ids=(1, 2, 3, 4, 5, 6, 7)):
+        c, model = self.load(slot_rows(ids))
+        artifact = json.loads(predict.canonical_json(predict.stage_a_artifact(c)))
+        state = sb.StageBState(c, model, sb.validate_candidate_artifact(artifact, c, model))
+        sb.apply_copy_of(state)
+        sb.apply_slot_conflict(state)
+        return c, state
+
+    def test_transitions(self):
+        c, state = self.run_s5()
+        for key in ((1, 2), (4, 5), (6, 7)):
+            self.assertIn(key, state.pairs)  # fixture precondition: candidates
+        conflict, overlap, failing = state.pairs[(1, 2)], state.pairs[(4, 5)], state.pairs[(6, 7)]
+        self.assertEqual((conflict.terminal, conflict.cannot_link, conflict.edge),
+                         ("template_slot_conflict", "template_slot_conflict", None))
+        self.assertEqual((failing.terminal, failing.cannot_link, failing.edge), (None, None, None))
+        # copy_of precedence: the pair satisfies both rules, copy_of stays.
+        arts = {a.id: a for a in c.articles}
+        self.assertTrue(sb.slot_conflict(arts[4], arts[5]))
+        self.assertTrue(sb.copy_of_qualifies(arts[4], arts[5], state.model))
+        self.assertEqual((overlap.terminal, overlap.cannot_link, overlap.edge),
+                         ("copy_of", None, "copy_of"))
+        self.assertEqual(state.edges, [sb.Edge("copy_of", 4, 5, overlap.cosine)])
+
+    def test_non_candidate_conflict_is_a_blocking_fact_only(self):
+        c, state = self.run_s5()
+        self.assertNotIn((1, 3), state.pairs)
+        self.assertNotIn((2, 3), state.pairs)
+        arts = {a.id: a for a in c.articles}
+        self.assertTrue(sb.slot_conflict(arts[1], arts[3]))
+        self.assertTrue(sb.slot_conflict_cannot_link(state, 3, 1))
+        # Querying creates no pair state, edge or decision for the non-candidate pair.
+        self.assertNotIn((1, 3), state.pairs)
+        self.assertEqual(len(state.edges), 1)
+
+    def test_cannot_link_query_respects_copy_of_precedence(self):
+        c, state = self.run_s5()
+        self.assertTrue(sb.slot_conflict_cannot_link(state, 1, 2))
+        self.assertFalse(sb.slot_conflict_cannot_link(state, 4, 5))   # copy_of pair
+        self.assertFalse(sb.slot_conflict_cannot_link(state, 6, 7))
+
+    def test_rerun_is_idempotent(self):
+        c, state = self.run_s5()
+        before = (copy.deepcopy(state.pairs), list(state.edges))
+        sb.apply_copy_of(state)
+        sb.apply_slot_conflict(state)
+        self.assertEqual((state.pairs, state.edges), before)
+
+    def test_article_id_permutation(self):
+        def by_url(c, state):
+            url = {a.id: a.normalized_url for a in c.articles}
+            return {tuple(sorted((url[p.a], url[p.b]))): (p.terminal, p.cannot_link, p.edge)
+                    for p in state.pairs.values()}
+        self.assertEqual(by_url(*self.run_s5((1, 2, 3, 4, 5, 6, 7))),
+                         by_url(*self.run_s5((70, 9, 33, 4, 58, 21, 2))))
 
 
 if __name__ == "__main__":

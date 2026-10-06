@@ -1,8 +1,8 @@
 """Experiment 002 Stage B (relationship classification), research only.
 
 Implemented so far: loading and integrity validation of the sealed Stage A
-candidate artifact, candidate pair state, and S5 step 1 (`copy_of`).
-Later S5 steps and S6-S11 are not implemented yet.
+candidate artifact, candidate pair state, S5 step 1 (`copy_of`) and S5 step 2
+(template slot conflict). Later S5 steps and S6-S11 are not implemented yet.
 
 Specification: docs/experiments/002-event-relationship-baseline.md, sections
 5-12 and the Stage B pre-implementation clarifications (C1-C15, R1-R5,
@@ -18,9 +18,9 @@ from pathlib import Path
 
 from . import rules
 from .candidates import ROUTES, CorpusModel, candidate_config
-from .corpus import Article, Corpus, file_sha256
+from .corpus import Article, Corpus, file_sha256, template_scope
 from .predict import DESIGN_COMMIT, FORMAT, FORMAT_VERSION
-from .text import char_trigrams, clean_text, cosine, jaccard
+from .text import char_trigrams, clean_text, compare_title_templates, cosine, jaccard
 
 
 class StageBInputError(ValueError):
@@ -221,3 +221,43 @@ def apply_copy_of(state: StageBState) -> None:
         if not (a.container_flag or b.container_flag):
             pair.edge = "copy_of"
             state.edges.append(Edge("copy_of", pair.a, pair.b, pair.cosine))
+
+
+# --- S5 step 2: template slot conflict -------------------------------------------
+
+SLOT_CONFLICT = rules.DISTINCT_RULES[0]  # "template_slot_conflict"
+
+
+def slot_conflict(a: Article, b: Article) -> bool:
+    """Frozen template slot conflict (design section 3) for any two articles.
+
+    Same template scope (source, and document type or else format class) and
+    ``compare_title_templates`` reports a slot conflict. Creates nothing; it
+    only states whether the condition holds.
+    """
+    return template_scope(a) == template_scope(b) and \
+        compare_title_templates(a.title, b.title).slot_conflict
+
+
+def apply_slot_conflict(state: StageBState) -> None:
+    """S5 step 2. A non-terminal candidate pair with a slot conflict becomes
+    terminal ``template_slot_conflict`` with a cannot-link and no edge."""
+    for pair in state.pairs.values():
+        if pair.terminal is not None:
+            continue
+        if slot_conflict(state.articles[pair.a], state.articles[pair.b]):
+            pair.terminal = SLOT_CONFLICT
+            pair.cannot_link = SLOT_CONFLICT
+
+
+def slot_conflict_cannot_link(state: StageBState, x: int, y: int) -> bool:
+    """Whether articles x and y have a slot-conflict cannot-link (after S5).
+
+    For a sealed candidate pair this is the S5 decision, so `copy_of`
+    precedence holds. Any other pair is checked directly (C1: non-candidate
+    pairs may only block); no pair state or prediction is created for it.
+    """
+    key = (min(x, y), max(x, y))
+    if key in state.pairs:
+        return state.pairs[key].cannot_link == SLOT_CONFLICT
+    return slot_conflict(state.articles[x], state.articles[y])
