@@ -16,6 +16,7 @@ from pathlib import Path
 
 from research.e002 import candidates as cand
 from research.e002 import corpus, predict, rules
+from research.e002 import text as text_module
 from research.e002.candidates import ArticleFeatures
 from tests.e002_support import article, build_db
 
@@ -282,6 +283,118 @@ class FeatureTests(DatabaseTestCase):
         self.assertEqual(p_live, p_plain)
         self.assertTrue({(1, 2), (2, 3)} <= p_live)
         self.assertNotIn((1, 3), p_live)
+
+
+def reference_build_features(articles, catch_all_categories=cand.DEFAULT_CATCH_ALL_CATEGORIES):
+    """The pre-refactor build_features body, kept verbatim as an oracle."""
+    from research.e002.text import (
+        detect_wrappers, distinctive_numbers, document_frequencies, entity_spans,
+        extract_numbers, inverse_document_frequencies, repeated_sentences,
+        source_common_tokens, tokenize, weighted_vector)
+    articles = sorted(articles, key=lambda a: a.id)
+    excluded = {cand.normalize_category(c) for c in catch_all_categories} | set(rules.DOCUMENT_TYPES)
+    numbers = {a.id: frozenset(x.key for x in extract_numbers(a.title))
+               | frozenset(x.key for x in extract_numbers(a.summary)) for a in articles}
+    distinctive = distinctive_numbers(numbers.values())
+    by_source = {}
+    for a in articles:
+        by_source.setdefault(a.source_id, []).append(a)
+    wrappers = {s: detect_wrappers([cand._summary_raw_tokens(a.summary) for a in group])
+                for s, group in by_source.items()}
+    boilerplate = repeated_sentences(((a.source_id, a.id, a.summary) for a in articles),
+                                     distinctive)
+    title_tokens = {a.id: tokenize(a.title) for a in articles}
+    summary_tokens = {
+        a.id: cand.suppressed_summary_tokens(a.summary, wrappers[a.source_id],
+                                             boilerplate.get(a.source_id, frozenset()))
+        for a in articles}
+    all_tokens = {a.id: title_tokens[a.id] + summary_tokens[a.id] for a in articles}
+    common = source_common_tokens((a.source_id, all_tokens[a.id]) for a in articles)
+    idf = inverse_document_frequencies(document_frequencies(all_tokens.values()), len(articles))
+    return tuple(
+        ArticleFeatures(
+            id=a.id, source_id=a.source_id, time=a.representative_time,
+            issuing_unit=a.issuing_unit,
+            vector=weighted_vector(title_tokens[a.id], summary_tokens[a.id], idf,
+                                   zero_weight=common.get(a.source_id, frozenset())),
+            numbers=numbers[a.id],
+            entities=frozenset(e.casefold() for e in entity_spans(a.title)),
+            tags=frozenset(cand.normalize_category(c) for c in a.categories) - excluded)
+        for a in articles)
+
+
+class CorpusModelTests(DatabaseTestCase):
+    BOILER = "Our agency helps every small firm in the whole region grow faster today."
+
+    def rows(self):
+        rows = []
+        for i, w in enumerate(["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"], start=1):
+            rows.append(article(
+                i, title=f"Acme Widget {w} plan costs \u00a3{i}m",
+                summary=f"Agency notice board. {self.BOILER} The {w} widget plant opens. Continue reading",
+                published_at=f"2026-01-1{i}T12:00:00Z", first_seen_at=f"2026-01-1{i}T12:00:00Z",
+                sightings=((None, ["Widgets", "Ports" if i % 2 else "Rail"]),)))
+        rows += [
+            article(7, source="gov-b", url="https://www.canada.ca/en/widget-agency/news/a.html",
+                    title="Minister Doe opens Zeta port",
+                    summary="The Zeta port cost $20 million and employs 300 staff.",
+                    date_status="updated_only", published_at=None,
+                    updated_at="2026-01-12T10:00:00Z", sightings=((None, ["news releases"]),)),
+            article(8, source="gov-b", url="https://www.canada.ca/en/widget-agency/news/b.html",
+                    title="Zeta port backgrounder",
+                    summary="More than $20 million supports the Zeta port and 300 staff.",
+                    date_status="updated_only", published_at=None,
+                    updated_at="2026-01-12T10:30:00Z", sightings=((None, ["backgrounders"]),)),
+            article(9, url="https://example.test/business/live/x",
+                    title="Markets day; Zeta port opens - as it happened",
+                    summary="Zeta port opens. Acme widget plan revealed. Shares rise 4.2%."),
+        ]
+        return rows
+
+    def setUp(self):
+        super().setUp()
+        self.corpus, _ = self.load(self.rows())
+        self.model = cand.corpus_model(self.corpus.articles)
+
+    def test_exposes_intermediates(self):
+        m = self.model
+        self.assertEqual(m.numbers[7], {"$20000000", "300"})
+        self.assertIn("$20000000", m.distinctive)
+        self.assertIn(("agency", "notice", "board"), m.wrappers["pub-a"].prefixes)
+        self.assertEqual(len(m.boilerplate["pub-a"]), 1)
+        self.assertEqual(m.title_tokens[7], ("minister", "doe", "open", "zeta", "port"))
+        sentences = text_module.split_sentences(self.corpus.articles[0].summary)
+        self.assertEqual(len(m.sentence_tokens[1]), len(sentences))
+        self.assertEqual(m.sentence_tokens[1][0], ())   # wrapper prefix sentence
+        self.assertEqual(m.sentence_tokens[1][1], ())   # boilerplate sentence
+        self.assertIn("alpha", m.sentence_tokens[1][2])
+        self.assertIn("widget", m.common["pub-a"])
+        vocabulary = set()
+        for i in m.title_tokens:
+            vocabulary |= set(m.title_tokens[i]) | {t for s in m.sentence_tokens[i] for t in s}
+        self.assertEqual(set(m.idf), vocabulary)
+        self.assertEqual([f.id for f in m.features], [1, 2, 3, 4, 5, 6, 7, 8, 9])
+
+    def test_sentence_tokens_flatten_to_suppressed_summary(self):
+        m = self.model
+        for a in self.corpus.articles:
+            with self.subTest(article=a.id):
+                flat = [t for s in m.sentence_tokens[a.id] for t in s]
+                self.assertEqual(flat, cand.suppressed_summary_tokens(
+                    a.summary, m.wrappers[a.source_id], m.boilerplate.get(a.source_id, frozenset())))
+
+    def test_build_features_unchanged(self):
+        reference = reference_build_features(self.corpus.articles)
+        self.assertEqual(cand.build_features(self.corpus.articles), reference)
+        self.assertEqual(self.model.features, reference)
+        self.assertEqual(cand.generate_candidates(cand.build_features(self.corpus.articles)),
+                         cand.generate_candidates(reference))
+        self.assertGreater(len(cand.generate_candidates(reference)), 0)
+
+    def test_independent_of_input_order(self):
+        shuffled = list(self.corpus.articles)
+        random.Random(5).shuffle(shuffled)
+        self.assertEqual(cand.corpus_model(shuffled), self.model)
 
 
 class CatchAllCategoryTests(DatabaseTestCase):

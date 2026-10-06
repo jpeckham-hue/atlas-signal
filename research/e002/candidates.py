@@ -16,6 +16,7 @@ from typing import Iterable, Sequence
 from . import rules
 from .corpus import Article
 from .text import (
+    Wrappers,
     aligned_tokens,
     cosine,
     detect_wrappers,
@@ -64,23 +65,39 @@ class ArticleFeatures:
     tags: frozenset[str]      # eligible normalized categories
 
 
+def suppressed_sentence_tokens(
+    summary: str,
+    wrappers,
+    boilerplate: frozenset[tuple[str, ...]],
+) -> list[list[str]]:
+    """Content tokens per summary sentence after wrapper and boilerplate removal.
+
+    One list per ``split_sentences(summary)`` sentence, in order; a boilerplate
+    sentence, or one wholly inside a wrapper, gives an empty list.
+    """
+    sentences = [aligned_tokens(s) for s in split_sentences(summary)]
+    raw = [r for sentence in sentences for r, _ in sentence]
+    keep_from, keep_to = _wrapper_bounds(raw, wrappers)
+    result, pos = [], 0
+    for sentence in sentences:
+        removed = tuple(r for r, _ in sentence) in boilerplate
+        tokens = []
+        for _, content in sentence:
+            if not removed and keep_from <= pos < keep_to and content is not None:
+                tokens.append(content)
+            pos += 1
+        result.append(tokens)
+    return result
+
+
 def suppressed_summary_tokens(
     summary: str,
     wrappers,
     boilerplate: frozenset[tuple[str, ...]],
 ) -> list[str]:
     """Content tokens of a summary after wrapper and boilerplate removal."""
-    sentences = [aligned_tokens(s) for s in split_sentences(summary)]
-    raw = [r for sentence in sentences for r, _ in sentence]
-    keep_from, keep_to = _wrapper_bounds(raw, wrappers)
-    tokens, pos = [], 0
-    for sentence in sentences:
-        removed = tuple(r for r, _ in sentence) in boilerplate
-        for _, content in sentence:
-            if not removed and keep_from <= pos < keep_to and content is not None:
-                tokens.append(content)
-            pos += 1
-    return tokens
+    return [t for sentence in suppressed_sentence_tokens(summary, wrappers, boilerplate)
+            for t in sentence]
 
 
 def _wrapper_bounds(raw: Sequence[str], wrappers) -> tuple[int, int]:
@@ -97,6 +114,25 @@ def _summary_raw_tokens(summary: str) -> list[str]:
     return [r for s in split_sentences(summary) for r, _ in aligned_tokens(s)]
 
 
+@dataclass(frozen=True)
+class CorpusModel:
+    """Corpus-wide preprocessing intermediates (design sections 2 and 3).
+
+    Everything ``build_features`` derives its features from. Keyed by article
+    ID or source ID; ``features`` is sorted by article ID.
+    """
+
+    numbers: dict[int, frozenset[str]]                 # Amount keys, title and summary
+    distinctive: frozenset[str]                        # Amount keys with DF <= NUM_MAX_DF
+    wrappers: dict[str, Wrappers]                      # per source
+    boilerplate: dict[str, frozenset[tuple[str, ...]]]  # per source, sentence keys
+    title_tokens: dict[int, tuple[str, ...]]
+    sentence_tokens: dict[int, tuple[tuple[str, ...], ...]]  # suppressed, per sentence
+    common: dict[str, frozenset[str]]                  # per source, zero-weight tokens
+    idf: dict[str, float]
+    features: tuple[ArticleFeatures, ...]
+
+
 def build_features(
     articles: Sequence[Article],
     catch_all_categories: Iterable[str] = DEFAULT_CATCH_ALL_CATEGORIES,
@@ -105,6 +141,14 @@ def build_features(
 
     Returns features sorted by article ID.
     """
+    return corpus_model(articles, catch_all_categories).features
+
+
+def corpus_model(
+    articles: Sequence[Article],
+    catch_all_categories: Iterable[str] = DEFAULT_CATCH_ALL_CATEGORIES,
+) -> CorpusModel:
+    """Compute the corpus model, including the Stage A features."""
     articles = sorted(articles, key=lambda a: a.id)
     excluded = {normalize_category(c) for c in catch_all_categories} | set(rules.DOCUMENT_TYPES)
 
@@ -121,16 +165,18 @@ def build_features(
                                      distinctive)
 
     title_tokens = {a.id: tokenize(a.title) for a in articles}
-    summary_tokens = {
-        a.id: suppressed_summary_tokens(a.summary, wrappers[a.source_id],
-                                        boilerplate.get(a.source_id, frozenset()))
+    sentence_tokens = {
+        a.id: suppressed_sentence_tokens(a.summary, wrappers[a.source_id],
+                                         boilerplate.get(a.source_id, frozenset()))
         for a in articles
     }
+    summary_tokens = {i: [t for sentence in sentences for t in sentence]
+                      for i, sentences in sentence_tokens.items()}
     all_tokens = {a.id: title_tokens[a.id] + summary_tokens[a.id] for a in articles}
     common = source_common_tokens((a.source_id, all_tokens[a.id]) for a in articles)
     idf = inverse_document_frequencies(document_frequencies(all_tokens.values()), len(articles))
 
-    return tuple(
+    features = tuple(
         ArticleFeatures(
             id=a.id,
             source_id=a.source_id,
@@ -143,6 +189,17 @@ def build_features(
             tags=frozenset(normalize_category(c) for c in a.categories) - excluded,
         )
         for a in articles
+    )
+    return CorpusModel(
+        numbers=numbers,
+        distinctive=distinctive,
+        wrappers=wrappers,
+        boilerplate=boilerplate,
+        title_tokens={i: tuple(t) for i, t in title_tokens.items()},
+        sentence_tokens={i: tuple(tuple(s) for s in ss) for i, ss in sentence_tokens.items()},
+        common=common,
+        idf=idf,
+        features=features,
     )
 
 

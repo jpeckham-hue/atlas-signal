@@ -207,6 +207,42 @@ def aligned_tokens(text: str | None) -> list[tuple[str, str | None]]:
     return pairs
 
 
+@dataclass(frozen=True)
+class TokenKind:
+    """One raw token with its content token and number-expression provenance."""
+
+    raw: str
+    content: str | None
+    number: bool  # produced by the number-expression matcher
+
+
+def token_kinds(text: str | None) -> list[TokenKind]:
+    """Raw tokens with content tokens and number-expression provenance, in order.
+
+    ``raw`` and ``content`` equal those of ``aligned_tokens(text)``. ``number``
+    is true exactly for tokens produced by the existing number-expression
+    matcher, including numbers that are not extracted as amounts (dates, years,
+    small integers such as ``10``). Number words such as ``ten`` are ordinary
+    words here.
+    """
+    text = normalize_text(text)
+    kinds: list[TokenKind] = []
+    pos = 0
+
+    def words(segment: str) -> None:
+        for w in _WORD.findall(segment):
+            content = None if w in rules.STOPWORDS or w.isdigit() else strip_plural(w)
+            kinds.append(TokenKind(w, content, False))
+
+    for m, amount in _number_matches(text):
+        words(text[pos:m.start()])
+        kinds.append(TokenKind(re.sub(r"\s+", "", m.group(0)),
+                               amount.key if amount else None, True))
+        pos = m.end()
+    words(text[pos:])
+    return kinds
+
+
 def tokenize(text: str | None) -> list[str]:
     """Content tokens in order: words and amount keys.
 

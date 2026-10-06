@@ -65,6 +65,43 @@ class AlignedTokenTests(unittest.TestCase):
                 self.assertEqual([c for _, c in pairs if c is not None], text.tokenize(sample))
 
 
+class TokenKindTests(unittest.TestCase):
+    def kinds(self, s):
+        return [(k.raw, k.content, k.number) for k in text.token_kinds(s)]
+
+    def test_matches_aligned_tokens(self):
+        for sample in AlignedTokenTests.SAMPLES:
+            with self.subTest(sample=sample):
+                self.assertEqual([(k.raw, k.content) for k in text.token_kinds(sample)],
+                                 text.aligned_tokens(sample))
+
+    def test_number_provenance(self):
+        self.assertEqual(self.kinds("after 10 years"),
+                         [("after", None, False), ("10", None, True), ("years", "year", False)])
+        self.assertEqual(self.kinds("up 4.2% to \u00a35 m"),
+                         [("up", None, False), ("4.2%", "4.2%", True), ("to", None, False),
+                          ("\u00a35m", "\u00a35000000", True)])
+        self.assertEqual(self.kinds("on 2 October 2026"),
+                         [("on", None, False), ("2", None, True), ("october", "october", False),
+                          ("2026", None, True)])
+
+    def test_small_literals_keep_provenance_though_not_amounts(self):
+        self.assertEqual(text.extract_numbers("10 years"), ())
+        self.assertTrue(text.token_kinds("10 years")[0].number)
+
+    def test_magnitudes_consistent_with_number_machinery(self):
+        for form in ("\u00a35m", "\u00a35 m", "\u00a35 million", "$2.9bn", "$2.9 billion", "7 k"):
+            with self.subTest(form=form):
+                (kind,) = text.token_kinds(form)
+                self.assertTrue(kind.number)
+                self.assertEqual(kind.content, text.extract_numbers(form)[0].key)
+
+    def test_number_words_and_alphanumerics_are_not_numbers(self):
+        for word in ("one", "two", "ten", "twenty", "several", "g20", "4x4"):
+            with self.subTest(word=word):
+                self.assertFalse(any(k.number for k in text.token_kinds(word)))
+
+
 class PluralTests(unittest.TestCase):
     def test_rules_and_minimum_stem(self):
         cases = {
