@@ -801,6 +801,26 @@ corpus's separate `canonical_url` column is not an approved input):
   source-common on either side does not qualify. The distinctive-number
   requirement and all thresholds are unchanged.
 
+Final clarification, discovered during implementation planning after the Stage B
+specification checkpoint `adae7519b7034472dabbe79c9c40d58467401710` and before
+any Stage B implementation or prediction; resolved by a conservative
+deterministic reading, not from observed evaluation performance:
+
+- **T1 — Time-expression abstention.** The normalized antecedent span (C6) is
+  inspected from its beginning. The cue abstains when the span begins with
+  `NUMBER TIME_UNIT` or `ARTICLE TIME_UNIT`; the time expression need only be a
+  prefix of the span.
+  - `TIME_UNIT`: the C6 lexicon (second, minute, hour, day, week, month, year,
+    decade) and their regular plurals.
+  - `ARTICLE`: `a`, `an`, `the`.
+  - `NUMBER`: a numeric literal matched by the existing number-expression
+    machinery (including small integers that the amount extractor excludes as
+    distinctive numbers), or one of the simple number words `one` … `ten`.
+  - Abstains: "10 years", "10 years of decline", "two decades of decline",
+    "a decade of decline", "the year before …". Does not abstain on this rule:
+    "years of decline", "several years of decline", "Britain's 10 years of …".
+    No general number-word parsing and no further lexicon.
+
 **Provenance.** The Stage B prediction artifact records the frozen corpus,
 candidate-artifact and Stage A configuration identities and a Stage B
 specification/configuration hash. It does not need to contain the commit hash
