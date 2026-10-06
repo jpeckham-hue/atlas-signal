@@ -600,3 +600,210 @@ independent evidence. Ablations report each rule's contribution.
   The approved proposal named EC `GENINFO` as excluded; this design kept the
   concept but omitted the value. This is a specification clarification, not
   tuning.
+
+### Stage B pre-implementation clarifications (2026-10-06)
+
+**Context.** The Experiment 002 design remains frozen at commit
+`1592ca8e6b6fbe810e928438d9d37ac5a999e200`. The clarifications below were
+recorded **after Stage A Run 1 was sealed and after its post-hoc diagnoses were
+observed**. Each was therefore chosen by literal or conservative reading and by
+adding the least new capability, not by expected evaluation performance, and
+not from gold outcomes. They do not modify Stage A or its sealed result. Stage B
+had not been implemented or executed when they were recorded. They resolve
+ambiguities only; no threshold or other frozen rule changes.
+
+- **C1 — Scope.** Stage B is candidate-bounded. Relationship-producing
+  decisions, container attachments and antecedent matches may use only pairs
+  present in the sealed 485-pair Stage A candidate artifact. Non-candidate cross
+  pairs may be inspected only for merge-blocking invariants (cannot-link and
+  the clustering cosine floor). Stage B does not recover pairs omitted by
+  Stage A.
+- **C2 — `follows_from` staging.** S5 identifies qualifying candidate
+  antecedent articles and records the pending relation and an article-level
+  cannot-link. S10 maps the pending relation to clustered events and emits it
+  only when exactly one valid antecedent event remains.
+- **C3 — Container clause matching.** Clause vectors use the frozen tokenizer
+  and IDF, title weight 1, and the container source's source-common zero
+  weights. Summary sentences are the suppressed sentences. An event qualifies
+  if any non-container member satisfies the frozen clause condition; its score
+  is its highest qualifying member cosine. "Shared content token" means a
+  shared non-amount content token. Matching is candidate-bounded under C1.
+- **C4 — Title splitting.** Only the frozen split delimiters and cue words are
+  applied. No special preprocessing is added for live-blog, date or round-up
+  marker text. Empty clauses and clauses without content tokens may be
+  discarded. *Accepted consequence:* a live-blog suffix such as "as it
+  happened" can survive splitting as its own clause and, if it has content
+  tokens and matches no event, create a container-only event; date and
+  round-up material is likewise not removed. This follows from the
+  conservative reading and is not to be repaired in Run 1.
+- **C5 — `follows_from` head.** For a non-container article the head is its own
+  event. For a container it is the event attached to the head clause, or the
+  container-only event created by that clause. C1 applies.
+- **C6 — Antecedent span.** The first qualifying cue is used. The antecedent
+  runs from after the cue to the next semicolon, spaced dash or end of title.
+  Time-expression abstention uses a generic time-unit lexicon: second, minute,
+  hour, day, week, month, year, decade (and plurals).
+- **C7 — Driving-edge exemption.** The direct edge currently driving a
+  proposed merge, whether from an S5 structural rule or from S6, is exempt from
+  the cross-pair cosine floor (`CLUSTER_MIN_CROSS_COSINE`); it has already met
+  its own frozen rule. Every other cross pair introduced by the merge must have
+  full-vector cosine ≥ the floor, and every cross pair, including the driving
+  edge, remains subject to cannot-link. Rationale (narrow): this stops the
+  generic clustering invariant from making an independently frozen direct-edge
+  branch inoperative, in particular the S6 title-only cosine branch (≥ 0.50),
+  whose full-vector cosine can be below the floor. No edge-generation threshold
+  changes.
+- **C8 — Edge ordering.** Structural same-event edges are processed first in
+  S5 order: `copy_of`, companion, advisory; within each type by cosine
+  descending, then the frozen non-ID tie-break. S6 edges follow, by cosine
+  descending and the same tie-break.
+- **C9 — Containers.** No rule creates a clustering edge involving a container.
+  Template slot conflict may still create a cannot-link. Container event
+  membership is assigned only through S8. `copy_of` detection still applies to
+  candidate pairs involving a container: a qualifying pair records an explicit
+  `copy_of` pair outcome, but creates no clustering edge and no shared event
+  membership by itself; S8 remains the only way a container joins events. For
+  non-container pairs a qualifying `copy_of` keeps its normal shared-event
+  (clustering-edge) consequence.
+- **C10 — S6 shared evidence.** Whichever S6 threshold branch fires, at least
+  one shared positive-weight non-amount content token must lie outside the
+  tokenized entity spans of both articles.
+- **C11 — Title-only cosine.** Title tokens only, with the same corpus IDF and
+  source-common zero weighting.
+- **C12 — Advisory anchors and abstention.** A rare-word-sequence anchor is
+  three consecutive raw tokens, each neither a stopword nor a number, taken
+  from the normalized title or from the unsuppressed summary, with article
+  DF ≤ 5. Title and summary are separate sequence domains: no sequence spans
+  the title→summary boundary. The entity anchor has
+  no DF restriction beyond the frozen rule. Advisory ambiguity gives the
+  candidate pair a final `unresolved` outcome for S5/S6 purposes, with no
+  cannot-link. **Elevated contamination risk:** the advisory heuristic was
+  already known to have review-informed targets; this clarification was chosen
+  conservatively, not from gold outcomes.
+- **C13 — Role precedence.** `anticipates` > `discusses` > `reports`. Cue
+  phrases are matched literally as frozen; the explainer cue uses the first
+  word of the normalized title. No factsheet detector is added, since
+  factsheets are not in the frozen document-type vocabulary.
+- **C14 — Artifact.** Stage B predictions use a separate ignored artifact,
+  `data/experiments/e002-stage-b-run1-predictions.json`, superseding the path
+  in section 12. It references the sealed Stage A candidate artifact by its
+  exact SHA-256 and identity/configuration hashes and does not duplicate the
+  Stage A per-pair signal records; it holds only Stage B decisions, evidence
+  and provenance plus stable candidate pair IDs that join back to the sealed
+  Stage A artifact. This supersedes section 12's `candidates: per pair, all
+  signal values`; the sealed Stage A artifact is the authoritative record of
+  those signals.
+- **C15 — Diagnostics deferred, not removed.** The naive-lexical baseline,
+  ablations and ±1 sensitivity sweep in sections 13 and 14 remain part of the
+  frozen design unless separately amended. C15 changes only their execution
+  order: (1) implement the primary frozen Stage B predictor; (2) generate its
+  first prediction artifact once; (3) seal that artifact and its provenance;
+  (4) only then may the frozen diagnostics be implemented or executed, kept
+  separate from the primary prediction artifact. No diagnostic result may
+  alter or replace Stage B Run 1.
+
+Further resolutions recorded under the same conditions:
+
+- **R1 — Cannot-links constrain all event membership.** An explicit
+  cannot-link means the two articles may not share an event membership by any
+  mechanism. S8 therefore respects cannot-links: before a container clause or
+  sentence attaches to event E, the container is checked against every
+  non-container member of E, and E is ineligible if any cannot-link (from a
+  template slot conflict or a `follows_from` cue) exists between them. A failed
+  attachment creates no new cannot-link.
+- **R2 — Containers are never antecedent articles.** A container is ineligible
+  as the matched S5 antecedent article of a `follows_from` cue; antecedent
+  matching considers eligible non-container candidate partners only. No
+  machinery chooses among a container's event memberships, and the rule is not
+  relaxed to find a usable antecedent: if the eligible evidence does not meet
+  the frozen uniqueness/abstention requirements, the cue abstains. A container
+  may still be the cue (head) article under C5.
+- **R3 — Antecedent zero weights.** Antecedent text extracted from a cue
+  article is vectorized with the cue article's own source-common zero weights.
+- **R4 — First cue occurrence.** C6's "first qualifying cue" is the first
+  frozen cue occurrence in title order. Only that cue is evaluated; if its
+  antecedent is a time expression or the rule otherwise abstains or fails, no
+  later cue is tried.
+- **R5 — Container membership role.** Every container membership has role
+  `reports`, as the frozen role rule states. The C13 precedence applies only to
+  non-container memberships; a container's format or document-type cues do not
+  override `reports`.
+
+Closing resolutions recorded under the same conditions (the ordering key
+below uses `normalized_url`, the URL field of the frozen tie-break; the
+corpus's separate `canonical_url` column is not an approved input):
+
+- **G1 — Candidate boundary for pair-level predictions.** Event construction may
+  transitively place articles in the same event even when not every pair of
+  members is a sealed Stage A candidate pair; such membership is not
+  suppressed. The candidate boundary governs which evidence may create
+  membership and which pairs receive pair-level predictions. Stage B derives a
+  pair-level outcome only for the 485 sealed candidate pairs: (1) a pair absent
+  from the sealed candidate artifact is `no_candidate`, regardless of any
+  shared derived membership; (2) for a candidate pair the outcome follows the
+  frozen order: explicit `copy_of`, shared membership (`same_event`), direct
+  relation (`linked`), explicit `distinct`, otherwise `unresolved`. Stage B
+  therefore cannot recover pair recall omitted by Stage A. For the future
+  Stage B scorer, candidate membership is the first pair-level gate:
+  not in the sealed Stage A candidate set → `no_candidate`, even if the two
+  articles share a derived event.
+- **G2 — Cannot-links against all existing members.** Before S8 attaches a
+  container to event E, the container is tested against every existing member
+  of E, containers included; any cannot-link makes E ineligible. Containers are
+  processed for S8 in ascending `(representative time, normalized_url)` order,
+  with no article-ID tie-break. A container that has attached to E is an
+  existing member and constrains later attachments. Rare container–container
+  conflicts are therefore order-dependent; no global optimization is used.
+- **G3 — Blocked is not unmatched.** If no event meets the clause-match
+  evidence condition, an unmatched title clause may create a container-only
+  event under the frozen rule. If one or more events meet it but all are
+  prohibited by cannot-links, the clause is blocked: it creates no membership
+  and no container-only event. A blocked attachment is recorded only as
+  provenance; it is not a pair label.
+- **G4 — Temporal validity at S5.** The frozen antecedent timing requirement is
+  applied during S5 article-level matching: a candidate partner whose
+  representative time is later than the cue article's is not a qualifying
+  antecedent article and receives neither a pending relation nor a
+  `follows_from` cannot-link. S10 maps the valid pending antecedent articles to
+  events and emits the relation only if exactly one valid antecedent event
+  remains (C2).
+- **G5 — Relation deduplication.** At most one relation is emitted per
+  `(from_event, to_event, type, basis)`. Several qualifying cue articles or cue
+  occurrences supporting the same relation do not create duplicates; all of
+  their cue provenance is kept on that relation, sorted by cue article
+  `(representative time, normalized_url)` and then token position. This is
+  deduplication, not evidence suppression.
+- **G6 — Candidate partner required for clause satisfaction.** Under C1 and C3,
+  the non-container member of E that satisfies the clause-match condition must
+  itself form a sealed Stage A candidate pair with the container. A
+  non-candidate member cannot make E eligible; other members still matter for
+  blocking under R1 and G2.
+- **H1 — S5 precedence is terminal for the pair.** Once S5 steps 1–4 produce a
+  decision for a candidate pair (qualifying `copy_of`; template slot conflict /
+  `distinct`; qualifying companion same-event; advisory same-event; advisory
+  abstention / `unresolved`), that pair cannot act as a `follows_from` cue /
+  antecedent pair in step 5. Evaluating an earlier rule and failing its
+  conditions is not terminal; the pair continues through the S5 order. If a
+  structural same-event edge is later blocked by an independent clustering
+  constraint, the pair is not reopened at S5 or reinterpreted as
+  `follows_from`. This restricts only that pair; neither article is barred from
+  otherwise eligible relationships with other candidate partners.
+- **H2 — Equal S8 scores.** If several eligible events tie for the highest S8
+  attachment score, the event with the lexicographically smallest member key is
+  chosen. The key is the event's members' `(representative time,
+  normalized_url)` tuples, sorted and compared lexicographically (the earliest
+  member decides unless tied, then the next). No article IDs, event IDs,
+  publisher identity or additional evidence are used.
+- **H3 — Shared content token needs positive weight.** For C3 clause-match
+  condition (a), the shared content token must be non-amount, occur in both the
+  clause and the satisfying non-container member, and have positive weight in
+  both the clause vector and the member's vector. A token zero-weighted as
+  source-common on either side does not qualify. The distinctive-number
+  requirement and all thresholds are unchanged.
+
+**Provenance.** The Stage B prediction artifact records the frozen corpus,
+candidate-artifact and Stage A configuration identities and a Stage B
+specification/configuration hash. It does not need to contain the commit hash
+of the code that produced it; the exact predictor commit is recorded in the
+sealing manifest after prediction generation, unless it can be included without
+modifying the sealed artifact.
