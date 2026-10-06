@@ -5,6 +5,7 @@ import builtins
 import contextlib
 import importlib
 import io
+import json
 import os
 import sys
 import tempfile
@@ -138,6 +139,65 @@ class StageALeakageTests(unittest.TestCase):
             imported = set(sys.modules) - before
             self.assertIn("research.e002.predict", imported)
             self.assertFalse([m for m in imported if "score" in m or "gold" in m])
+
+
+REAL_GOLD_NAME = "event-relationship" + "-gold.json"
+SEALED_ARTIFACT_NAME = "e002-stage-a-run1" + "-candidates.json"
+
+
+class ScorerArchitectureTests(unittest.TestCase):
+    def test_no_predictor_module_imports_the_scorer(self):
+        for path in predictor_files():
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    names = [node.module or ""] + [a.name for a in node.names]
+                elif isinstance(node, ast.Import):
+                    names = [a.name for a in node.names]
+                else:
+                    continue
+                with self.subTest(file=path.name):
+                    self.assertFalse([n for n in names if n.split(".")[-1] == "score"])
+
+    def test_scorer_does_not_regenerate_candidates_or_read_the_corpus(self):
+        tree = ast.parse((PACKAGE / "score.py").read_text(encoding="utf-8"))
+        used = set(code_strings_and_names(tree))
+        forbidden = {"generate_candidates", "build_features", "pair_signals", "load_corpus",
+                     "connect_readonly", "sqlite3", "corpus.py"}
+        self.assertFalse(used & forbidden)
+        self.assertFalse([u for u in used if "docs/research" in u or REAL_GOLD_NAME in u])
+
+    def test_scorer_opens_only_the_named_synthetic_files(self):
+        from tests.test_e002_score import LEX, artifact, gold, pair
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            cand_path, gold_path, out = tmp / "c.json", tmp / "g.json", tmp / "s.json"
+            cand_path.write_text(json.dumps(artifact({(1, 2): LEX})), encoding="utf-8")
+            gold_path.write_text(json.dumps(gold([("P2-01", 2, [pair(1, 2, "same_event")])])),
+                                 encoding="utf-8")
+            opened = []
+            real_open = builtins.open
+
+            def guarded_open(file, *args, **kwargs):
+                name = Path(str(file)).name
+                if name in (REAL_GOLD_NAME, SEALED_ARTIFACT_NAME):
+                    raise AssertionError(f"scorer opened {name}")
+                opened.append(str(file))
+                return real_open(file, *args, **kwargs)
+
+            from research.e002 import score
+            with mock.patch.object(builtins, "open", guarded_open),                     mock.patch.object(io, "open", guarded_open),                     contextlib.redirect_stdout(io.StringIO()):
+                code = score.main(["stage-a", "--candidates", str(cand_path), "--gold",
+                                   str(gold_path), "--out", str(out)])
+            self.assertEqual(code, 0)
+            self.assertEqual({Path(p).resolve() for p in opened},
+                             {cand_path.resolve(), gold_path.resolve(), out.resolve()})
+
+    def test_no_test_uses_the_sealed_real_artifact(self):
+        tests_dir = Path(__file__).resolve().parent
+        for path in sorted(tests_dir.glob("test_e002_*.py")):
+            with self.subTest(file=path.name):
+                self.assertNotIn(SEALED_ARTIFACT_NAME, path.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
