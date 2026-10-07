@@ -938,6 +938,48 @@ performance:
   edges without article IDs. No insertion order, article ID, pair ID,
   candidate-artifact order or other implementation-dependent tie-break is used.
 
+Pre-implementation clarifications, discovered during the read-only S7→S8
+implementation-boundary review after S7 was implemented and pushed (checkpoint
+`3db907b2ae6b421e6d7d76d90221240777d03c90`) and before any S8 code, real
+Stage B prediction or gold evaluation. C23–C24 were chosen from the frozen
+semantics and determinism requirements, not from observed Stage B performance.
+The same review confirmed, without change, two already-frozen S8 rules that an
+implementation brief had misstated: S8 evidence is the section 7/C3/H3 OR
+condition implemented by `clause_matches` (a shared distinctive number plus a
+qualifying shared non-amount positive-weight content token, or clause–member
+cosine ≥ `CONTAINER_CLAUSE_COSINE`); and S8 processes suppressed summary
+sentences as well as retained title clauses, with only unmatched title clauses
+creating container-only events. These are corrections to the brief, not new
+clarifications.
+
+- **C23 — C5 container head-clause identity.** For a container article with a
+  retained `follows_from` claim, the first cue is located as in R4/C6 and the
+  title is split by the frozen S8 rule (C4). The C5 head clause is the retained
+  S8 title clause immediately preceding that first cue in title order. A clause
+  or delimiter earlier in the title does not become the head because it comes
+  first, and the clause following the cue is not the head. If no retained title
+  clause immediately precedes the cue, the container has no head clause and no
+  head event; no earlier retained clause is searched for, and no other attached
+  clause or summary sentence is substituted. The head event for S10 is whatever
+  that exact clause resolves to in S8: the S7 event it attached to, or its own
+  container-only event if it was unmatched. If that clause is blocked or
+  otherwise resolves to no event, the container has no C5 head event for that
+  pending claim. C23 determines provenance and mapping only; title splitting,
+  cue detection, antecedent matching, S8 attachment thresholds and S10's
+  requirement that a pending claim map unambiguously to resolved events are
+  unchanged.
+- **C24 — H2 uses current working membership.** When H2 breaks an exact score
+  tie between eligible S8 events, an event's members are its current working
+  membership when the clause or sentence is evaluated: its S7 non-container
+  members plus any containers attached to it earlier under G2. Containers not
+  yet processed and later attachments are not included. Each event's key is its
+  current members' `(representative_time, normalized_url)` keys sorted
+  ascending, and the sorted key tuples are compared lexicographically. Article
+  IDs, cluster indices, insertion order and S7-only membership are never used
+  as a fallback. Container-only events cannot positively qualify (C3, G6) and
+  so never take part in this comparison. G2 processing order, positive
+  evidence qualification, blocking and event membership are unchanged.
+
 **Provenance.** The Stage B prediction artifact records the frozen corpus,
 candidate-artifact and Stage A configuration identities and a Stage B
 specification/configuration hash. It does not need to contain the commit hash
