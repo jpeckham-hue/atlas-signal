@@ -1,9 +1,10 @@
-"""Experiment 002 Stage B: candidate-artifact loading, S5 steps 1-5 and S6.
+"""Experiment 002 Stage B: candidate-artifact loading, S5 steps 1-5, S6 and S7.
 
 Synthetic fixtures only; no repository gold and no sealed real artifact.
 """
 
 import copy
+import dataclasses
 import json
 import math
 import random
@@ -1483,6 +1484,299 @@ class SameEventSourceCommonTests(SameEventFixture):
         # Two pub-a articles: 'harbour' has positive weight in both and qualifies.
         self.assertEqual(self.signals(state, 11, 12)[3], ("harbour",))
         self.assertEqual(state.pairs[(11, 12)].edge, "same_event")
+
+
+# --- S7: constrained clustering ------------------------------------------------------
+
+FLOOR = float(rules.CLUSTER_MIN_CROSS_COSINE)
+# |(3, 4)| = 5 and |(1, 3, 2, 1, 1)| = 4, so the cosine is exactly 3/20 = 0.15.
+AT_FLOOR = ({"p": 3.0, "q": 4.0}, {"p": 1.0, "r": 3.0, "s": 2.0, "t": 1.0, "u": 1.0})
+
+
+class ClusterFixture(Fixture):
+    """Hand-built S5/S6 state over a small synthetic corpus.
+
+    Articles are named by slug. Titles are lowercase and distinct, so no two
+    articles have a template slot conflict unless a test gives them one. Each
+    article's full vector is its own unit token (cosine 0 to every other
+    article) unless ``vectors`` overrides it.
+    """
+
+    SLUGS = ("a", "b", "c", "d", "e")
+
+    def make(self, pairs=(), edges=(), vectors=None, specs=None, ids=None):
+        specs = specs or {s: dict(hour=10 + k) for k, s in enumerate(self.SLUGS)}
+        ids = ids or tuple(range(1, len(specs) + 1))
+        rows, self.id = [], {}
+        for i, (slug, spec) in zip(ids, specs.items()):
+            spec = dict(spec)
+            title = spec.pop("title", f"{slug} lowercase story about item {slug}x")
+            rows.append(sa(i, slug, title, "Made-up summary.", **spec))
+            self.id[slug] = i
+        c, model = self.load(rows)
+        state = sb.StageBState(c, model, {})
+        self.slug = {i: s for s, i in self.id.items()}
+        for slug, i in self.id.items():
+            vector = (vectors or {}).get(slug, {f"own-{slug}": 1.0})
+            state.features[i] = dataclasses.replace(state.features[i], vector=vector)
+        for x, y, value, *cannot_link in pairs:
+            a, b = sorted((self.id[x], self.id[y]))
+            state.pairs[(a, b)] = sb.PairState(a=a, b=b, cosine=value, routes=("lexical_cosine",),
+                                               cannot_link=cannot_link[0] if cannot_link else None)
+        state.pairs = dict(sorted(state.pairs.items()))
+        for kind, x, y in edges:
+            a, b = sorted((self.id[x], self.id[y]))
+            state.pairs[(a, b)].edge = kind
+            state.edges.append(sb.Edge(kind, a, b, state.pairs[(a, b)].cosine))
+        return state
+
+    def cluster(self, *args, **kwargs):
+        state = self.make(*args, **kwargs)
+        sb.apply_clustering(state)
+        return state
+
+    def edge(self, e):
+        return (e.type, *sorted((self.slug[e.a], self.slug[e.b])))
+
+    def clusters(self, state):
+        return tuple(tuple(self.slug[i] for i in members) for members in state.clusters)
+
+    def dispositions(self, state):
+        return [(self.edge(d.edge), d.status,
+                 tuple((self.slug[b.x], self.slug[b.y], b.kind, b.detail, b.candidate)
+                       for b in d.blockers))
+                for d in state.edge_dispositions]
+
+    def status(self, state):
+        return {self.edge(d.edge): d.status for d in state.edge_dispositions}
+
+
+class ClusteringTests(ClusterFixture):
+    def test_simple_merge(self):
+        s = self.cluster([("a", "b", 0.5)], [("same_event", "a", "b")])
+        self.assertEqual(self.clusters(s), (("a", "b"), ("c",), ("d",), ("e",)))
+        self.assertEqual(self.dispositions(s), [(("same_event", "a", "b"), "merged", ())])
+
+    def test_driving_edge_exempt_from_floor(self):
+        s = self.cluster([("a", "b", 0.05)], [("same_event", "a", "b")])
+        self.assertEqual(self.clusters(s)[0], ("a", "b"))
+
+    def test_driving_cannot_link_rejects(self):
+        s = self.cluster([("a", "b", 0.05, "follows_from")], [("same_event", "a", "b")])
+        self.assertEqual(self.dispositions(s), [(("same_event", "a", "b"), "rejected",
+                                                 (("a", "b", "cannot_link", "follows_from", True),))])
+        self.assertEqual(self.clusters(s)[:2], (("a",), ("b",)))
+
+    def three(self, ac=None, vectors=None, specs=None):
+        pairs = [("a", "b", 0.9), ("b", "c", 0.5)] + ([("a", "c", *ac)] if ac else [])
+        return self.cluster(pairs, [("copy_of", "a", "b"), ("same_event", "b", "c")],
+                        vectors=vectors, specs=specs)
+
+    def test_non_driving_floor(self):
+        s = self.three(ac=(0.1,))
+        self.assertEqual(self.dispositions(s)[1],
+                         (("same_event", "b", "c"), "rejected",
+                          (("a", "c", "cosine_floor", 0.1, True),)))
+        self.assertEqual(self.clusters(s)[:2], (("a", "b"), ("c",)))
+        self.assertEqual(self.status(self.three(ac=(FLOOR,)))[("same_event", "b", "c")], "merged")
+        self.assertEqual(self.status(self.three(ac=(math.nextafter(FLOOR, 0.0),)))
+                         [("same_event", "b", "c")], "rejected")
+
+    def test_non_candidate_floor_uses_full_vectors(self):
+        self.assertEqual(cand.cosine(*AT_FLOOR), FLOOR)
+        at = self.three(vectors={"a": AT_FLOOR[0], "c": AT_FLOOR[1]})
+        self.assertEqual(self.clusters(at)[0], ("a", "b", "c"))
+        below = self.three()        # orthogonal vectors: non-candidate cosine 0
+        self.assertEqual(self.dispositions(below)[1][2],
+                         (("a", "c", "cosine_floor", 0.0, False),))
+
+    def test_candidate_follows_from_cannot_link_blocks(self):
+        s = self.three(ac=(0.8, "follows_from"))
+        self.assertEqual(self.dispositions(s)[1][1:],
+                         ("rejected", (("a", "c", "cannot_link", "follows_from", True),)))
+
+    def test_non_candidate_slot_conflict_blocks(self):
+        same = {"p": 1.0}
+        specs = {"a": dict(hour=10, title="Acme opens Zeta widget plant"),
+                 "b": dict(hour=11), "c": dict(hour=12, title="Acme opens Kappa widget plant"),
+                 "d": dict(hour=13), "e": dict(hour=14)}
+        s = self.three(vectors={"a": same, "c": same}, specs=specs)
+        self.assertTrue(sb.slot_conflict(s.articles[self.id["a"]], s.articles[self.id["c"]]))
+        self.assertEqual(self.dispositions(s)[1][1:],
+                         ("rejected", (("a", "c", "cannot_link", sb.SLOT_CONFLICT, False),)))
+
+    def test_passing_non_candidate_cross_pairs_merge(self):
+        s = self.three(vectors={"a": {"p": 1.0, "x": 1.0}, "c": {"p": 1.0, "y": 1.0}})
+        self.assertNotIn(tuple(sorted((self.id["a"], self.id["c"]))), s.pairs)
+        self.assertEqual(self.clusters(s)[0], ("a", "b", "c"))
+
+    def test_already_joined(self):
+        s = self.cluster([("a", "b", 0.9), ("b", "c", 0.8), ("a", "c", 0.7)],
+                     [("same_event", "a", "b"), ("same_event", "b", "c"),
+                      ("same_event", "a", "c")])
+        self.assertEqual([d[1] for d in self.dispositions(s)],
+                         ["merged", "merged", "already_joined"])
+        self.assertEqual(self.dispositions(s)[2][0], ("same_event", "a", "c"))
+
+    def test_type_priority_beats_cosine(self):
+        s = self.cluster([("a", "b", 0.9), ("b", "c", 0.2), ("a", "c", 0.1)],
+                     [("same_event", "a", "b"), ("copy_of", "b", "c")])
+        self.assertEqual(self.status(s), {("copy_of", "b", "c"): "merged",
+                                          ("same_event", "a", "b"): "rejected"})
+        self.assertEqual([d[0][0] for d in self.dispositions(s)], ["copy_of", "same_event"])
+
+    def test_full_type_priority(self):
+        pairs = [("a", "b", 0.2), ("b", "c", 0.3), ("c", "d", 0.4), ("d", "e", 0.5)]
+        edges = [("same_event", "d", "e"), ("advisory", "c", "d"), ("companion", "b", "c"),
+                 ("copy_of", "a", "b")]
+        s = self.cluster(pairs, edges, vectors={k: {"p": 1.0} for k in "abcde"})
+        self.assertEqual([d[0][0] for d in self.dispositions(s)], list(sb.EDGE_TYPES))
+
+    def test_cosine_descending_within_type(self):
+        s = self.cluster([("a", "b", 0.6), ("b", "c", 0.8), ("a", "c", 0.1)],
+                     [("same_event", "a", "b"), ("same_event", "b", "c")])
+        self.assertEqual(self.dispositions(s)[0][:2], (("same_event", "b", "c"), "merged"))
+        self.assertEqual(self.status(s)[("same_event", "a", "b")], "rejected")
+
+    def tie(self, specs):
+        return self.cluster([("a", "b", 0.5), ("b", "c", 0.5), ("a", "c", 0.1)],
+                        [("same_event", "b", "c"), ("same_event", "a", "b")], specs=specs)
+
+    def test_c22_tie_break_decides_the_topology(self):
+        early_a = {"a": dict(hour=10), "b": dict(hour=11), "c": dict(hour=12)}
+        early_c = {"a": dict(hour=12), "b": dict(hour=11), "c": dict(hour=10)}
+        s = self.tie(early_a)
+        self.assertEqual(self.status(s), {("same_event", "a", "b"): "merged",
+                                          ("same_event", "b", "c"): "rejected"})
+        self.assertIn(("a", "b"), self.clusters(s))
+        s = self.tie(early_c)
+        self.assertEqual(self.status(s), {("same_event", "b", "c"): "merged",
+                                          ("same_event", "a", "b"): "rejected"})
+        self.assertIn(("c", "b"), self.clusters(s))       # members in (time, url) order
+
+    def test_c22_sorts_each_edges_own_keys(self):
+        # Times a=11, b=12, c=10: sorted pairs (b, c) = (10, 12) < (a, b) = (11, 12),
+        # although b-c's unsorted (b, c) = (12, 10) would come after (11, 12).
+        s = self.tie({"a": dict(hour=11), "b": dict(hour=12), "c": dict(hour=10)})
+        self.assertEqual(self.status(s), {("same_event", "b", "c"): "merged",
+                                          ("same_event", "a", "b"): "rejected"})
+
+    def test_c22_equal_times_use_url(self):
+        # Equal times; URLs .../news/a < .../news/b < .../news/c.
+        s = self.tie({k: dict(hour=10) for k in "abc"})
+        self.assertEqual(self.status(s)[("same_event", "a", "b")], "merged")
+        # Article IDs ordered against the keys do not matter.
+        s = self.cluster([("a", "b", 0.5), ("b", "c", 0.5), ("a", "c", 0.1)],
+                     [("same_event", "a", "b"), ("same_event", "b", "c")],
+                     specs={k: dict(hour=10) for k in "abc"}, ids=(9, 5, 2))
+        self.assertEqual(self.status(s)[("same_event", "a", "b")], "merged")
+
+    def test_rejected_edge_not_reopened(self):
+        s = self.cluster([("a", "b", 0.9), ("b", "c", 0.8), ("a", "c", 0.1), ("c", "d", 0.5)],
+                     [("copy_of", "a", "b"), ("same_event", "b", "c"),
+                      ("same_event", "c", "d")])
+        self.assertEqual(self.status(s), {("copy_of", "a", "b"): "merged",
+                                          ("same_event", "b", "c"): "rejected",
+                                          ("same_event", "c", "d"): "merged"})
+        self.assertEqual(len(s.edge_dispositions), len(s.edges))
+        self.assertEqual(self.clusters(s), (("a", "b"), ("c", "d"), ("e",)))
+
+    def test_containers_absent(self):
+        specs = {"a": dict(hour=10), "b": dict(hour=11), "c": dict(hour=12, path="live"),
+                 "d": dict(hour=13), "e": dict(hour=14)}
+        s = self.cluster([("a", "b", 0.5), ("b", "c", 0.9)], [("same_event", "a", "b")], specs=specs)
+        container = self.id["c"]
+        self.assertTrue(s.articles[container].container_flag)
+        self.assertNotIn(container, s.cluster_of)
+        self.assertNotIn(container, [i for members in s.clusters for i in members])
+        self.assertEqual(self.clusters(s), (("a", "b"), ("d",), ("e",)))
+
+    def test_cluster_and_member_order(self):
+        s = self.cluster([("a", "b", 0.5), ("c", "e", 0.5)],
+                     [("same_event", "a", "b"), ("same_event", "c", "e")],
+                     specs={"a": dict(hour=14), "b": dict(hour=11), "c": dict(hour=12),
+                            "d": dict(hour=10), "e": dict(hour=13)})
+        self.assertEqual(self.clusters(s), (("d",), ("b", "a"), ("c", "e")))
+        self.assertEqual({self.slug[i]: n for i, n in s.cluster_of.items()},
+                         {"d": 0, "b": 1, "a": 1, "c": 2, "e": 2})
+
+    def scenario(self, ids=None):
+        pairs = [("a", "b", 0.9), ("b", "c", 0.5), ("c", "d", 0.5), ("a", "c", 0.1),
+                 ("d", "e", 0.4, "follows_from"), ("b", "d", 0.6)]
+        edges = [("same_event", "c", "d"), ("copy_of", "a", "b"), ("same_event", "b", "c"),
+                 ("advisory", "d", "e"), ("same_event", "b", "d")]
+        return self.make(pairs, edges, ids=ids)
+
+    def summary(self, state):
+        sb.apply_clustering(state)
+        return self.clusters(state), self.dispositions(state)
+
+    def test_article_id_permutation(self):
+        first = self.summary(self.scenario())
+        self.assertEqual(first, self.summary(self.scenario(ids=(41, 7, 23, 3, 15))))
+        self.assertIn("rejected", [d[1] for d in first[1]])
+
+    def test_incoming_edge_order(self):
+        state = self.scenario()
+        first = self.summary(state)
+        for seed in range(5):
+            random.Random(seed).shuffle(state.edges)
+            self.assertEqual(self.summary(state), first)
+
+    def test_all_blockers_in_order(self):
+        # {a, b} and {c, d}; driving b-c. Blockers: a-c cannot-link and floor
+        # (candidate), a-d floor (non-candidate), b-d floor (candidate).
+        specs = {k: dict(hour=10 + n) for n, k in enumerate("abcde")}
+        pairs = [("a", "b", 0.9), ("c", "d", 0.9), ("b", "c", 0.5),
+                 ("a", "c", 0.05, "follows_from"), ("b", "d", 0.1)]
+        edges = [("copy_of", "a", "b"), ("copy_of", "c", "d"), ("same_event", "b", "c")]
+        for ids in ((1, 2, 3, 4, 5), (5, 4, 3, 2, 1), (3, 5, 1, 4, 2)):
+            with self.subTest(ids=ids):
+                s = self.cluster(pairs, edges, specs=specs, ids=ids)
+                self.assertEqual(self.dispositions(s)[2],
+                                 (("same_event", "b", "c"), "rejected",
+                                  (("a", "c", "cannot_link", "follows_from", True),
+                                   ("a", "c", "cosine_floor", 0.05, True),
+                                   ("a", "d", "cosine_floor", 0.0, False),
+                                   ("b", "d", "cosine_floor", 0.1, True))))
+
+    def test_rerun_identical_and_inputs_unchanged(self):
+        state = self.scenario()
+        sb.apply_clustering(state)
+        pairs, edges = copy.deepcopy(state.pairs), list(state.edges)
+        result = (state.clusters, dict(state.cluster_of), state.edge_dispositions)
+        sb.apply_clustering(state)
+        self.assertEqual((state.clusters, state.cluster_of, state.edge_dispositions), result)
+        self.assertEqual((state.pairs, state.edges), (pairs, edges))
+
+    def test_malformed_edges_rejected(self):
+        state = self.make([("a", "b", 0.5)], [("same_event", "a", "b")])
+        state.edges.append(sb.Edge("copy_of", state.edges[0].a, state.edges[0].b, 0.5))
+        with self.assertRaises(ValueError):
+            sb.apply_clustering(state)
+        state = self.make([("a", "b", 0.5)], [("same_event", "a", "b")])
+        state.edges[0] = dataclasses.replace(state.edges[0], type="part_of")
+        with self.assertRaises(ValueError):
+            sb.apply_clustering(state)
+        specs = {"a": dict(hour=10), "b": dict(hour=11, path="live")}
+        state = self.make([("a", "b", 0.5)], [("same_event", "a", "b")], specs=specs)
+        with self.assertRaises(ValueError):
+            sb.apply_clustering(state)
+
+
+class ClusteringPipelineTests(SameEventFixture):
+    def test_every_non_container_once_after_s5_s6(self):
+        c, state = self.run_s6()
+        sb.apply_clustering(state)
+        members = [i for cluster in state.clusters for i in cluster]
+        non_containers = sorted(a.id for a in c.articles if not a.container_flag)
+        self.assertEqual(sorted(members), non_containers)
+        self.assertEqual(len(members), len(set(members)))
+        self.assertEqual(sorted(state.cluster_of), non_containers)
+        for n, cluster in enumerate(state.clusters):
+            self.assertTrue(all(state.cluster_of[i] == n for i in cluster))
+        for x, y in ((1, 2), (3, 4), (5, 6), (15, 16)):
+            self.assertEqual(state.cluster_of[x], state.cluster_of[y])
 
 
 if __name__ == "__main__":

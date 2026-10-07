@@ -3,7 +3,8 @@
 Implemented so far: loading and integrity validation of the sealed Stage A
 candidate artifact, candidate pair state, S5 steps 1-5 (`copy_of`,
 template slot conflict, companion documents, advisory match, `follows_from`
-cue) and S6 same-event decisions. S7-S11 are not implemented yet.
+cue), S6 same-event decisions and S7 constrained clustering. S8-S11 are not
+implemented yet.
 
 Specification: docs/experiments/002-event-relationship-baseline.md, sections
 5-12 and the Stage B pre-implementation clarifications (C1-C15, R1-R5,
@@ -101,6 +102,10 @@ class StageBState:
     pairs: dict[tuple[int, int], PairState]   # sorted by (a, b)
     edges: list[Edge] = field(default_factory=list)
     pending: dict[int, "PendingRelation"] = field(default_factory=dict)  # by cue article
+    # S7 output, replaced on every apply_clustering call.
+    clusters: tuple[tuple[int, ...], ...] = ()     # non-container articles, key-ordered
+    cluster_of: dict[int, int] = field(default_factory=dict)  # article -> index in clusters
+    edge_dispositions: tuple["EdgeDisposition", ...] = ()     # in processing order
 
     def __post_init__(self):
         self.articles: dict[int, Article] = {a.id: a for a in self.corpus.articles}
@@ -684,3 +689,133 @@ def apply_same_event(state: StageBState) -> None:
         pair.edge = "same_event"
         pair.s6 = branches
         state.edges.append(Edge("same_event", pair.a, pair.b, pair.cosine))
+
+
+# --- S7: constrained clustering ------------------------------------------------------
+
+# C8 edge-type priority.
+EDGE_TYPES = ("copy_of", "companion", "advisory", "same_event")
+
+
+@dataclass(frozen=True)
+class Blocker:
+    """One failed cross-pair constraint of a rejected merge.
+
+    ``x`` and ``y`` are ordered by article key. ``detail`` is the cannot-link
+    source for ``cannot_link`` and the cross-pair cosine for ``cosine_floor``.
+    """
+
+    x: int
+    y: int
+    kind: str                # "cannot_link" or "cosine_floor"
+    detail: str | float
+    candidate: bool          # whether (x, y) is a sealed candidate pair
+
+
+@dataclass(frozen=True)
+class EdgeDisposition:
+    """What S7 did with one driving edge."""
+
+    edge: Edge
+    status: str                          # "merged", "already_joined" or "rejected"
+    blockers: tuple[Blocker, ...] = ()   # only for "rejected"
+
+
+def edge_order(edge: Edge, articles: dict[int, Article]) -> tuple:
+    """C8/C22 processing key: type priority, cosine descending, then the
+    edge's two article keys sorted ascending. No article IDs."""
+    keys = tuple(sorted((_order_key(articles[edge.a]), _order_key(articles[edge.b]))))
+    return (EDGE_TYPES.index(edge.type), -edge.cosine, keys)
+
+
+def ordered_edges(state: StageBState) -> list[Edge]:
+    """``state.edges`` in C8/C22 order, independent of their incoming order.
+
+    Raises ValueError on malformed state: an unknown edge type, an edge
+    involving a container (C9), or more than one edge for a pair.
+    """
+    seen: set[tuple[int, int]] = set()
+    for edge in state.edges:
+        if edge.type not in EDGE_TYPES:
+            raise ValueError(f"unknown edge type {edge.type!r}")
+        if state.articles[edge.a].container_flag or state.articles[edge.b].container_flag:
+            raise ValueError(f"edge ({edge.a}, {edge.b}) involves a container")
+        key = (min(edge.a, edge.b), max(edge.a, edge.b))
+        if key in seen:
+            raise ValueError(f"more than one edge for pair {key}")
+        seen.add(key)
+    return sorted(state.edges, key=lambda e: edge_order(e, state.articles))
+
+
+def cross_pair_blockers(state: StageBState, x: int, y: int, driving: bool) -> list[Blocker]:
+    """Constraint failures of one cross pair (C1, C7, R1).
+
+    Cannot-link applies to every cross pair, the driving pair included: a
+    candidate pair's recorded cannot-link, or for a non-candidate pair a
+    template slot conflict. Every cross pair except the driving pair must have
+    full-vector cosine at least CLUSTER_MIN_CROSS_COSINE (compared as its
+    float, the Stage A convention).
+    """
+    if _order_key(state.articles[y]) < _order_key(state.articles[x]):
+        x, y = y, x
+    pair = state.pairs.get((min(x, y), max(x, y)))
+    candidate = pair is not None
+    if candidate:
+        source = pair.cannot_link
+    else:
+        source = SLOT_CONFLICT if slot_conflict(state.articles[x], state.articles[y]) else None
+    blockers = []
+    if source is not None:
+        blockers.append(Blocker(x, y, "cannot_link", source, candidate))
+    if not driving:
+        value = pair.cosine if candidate else cosine(state.features[x].vector,
+                                                     state.features[y].vector)
+        if value < float(rules.CLUSTER_MIN_CROSS_COSINE):
+            blockers.append(Blocker(x, y, "cosine_floor", value, candidate))
+    return blockers
+
+
+def _blocker_order(state: StageBState, blocker: Blocker) -> tuple:
+    return (_order_key(state.articles[blocker.x]), _order_key(state.articles[blocker.y]),
+            blocker.kind)
+
+
+def apply_clustering(state: StageBState) -> None:
+    """S7, recomputed from scratch on every call.
+
+    Every non-container article starts as a singleton; containers take no
+    part (C9). Edges are processed once each in C8/C22 order. A driving edge
+    whose ends are already together is ``already_joined``. Otherwise every
+    cross pair of the two components is checked, and the merge is rejected,
+    with all blockers recorded, if any fails. Replaces ``clusters``,
+    ``cluster_of`` and ``edge_dispositions``; pair states and edges are not
+    modified.
+    """
+    component = {i: frozenset((i,)) for i, a in state.articles.items() if not a.container_flag}
+    dispositions = []
+    for edge in ordered_edges(state):
+        left, right = component[edge.a], component[edge.b]
+        if left is right:
+            dispositions.append(EdgeDisposition(edge, "already_joined"))
+            continue
+        blockers = [b for x in left for y in right
+                    for b in cross_pair_blockers(state, x, y,
+                                                 {x, y} == {edge.a, edge.b})]
+        if blockers:
+            blockers.sort(key=lambda b: _blocker_order(state, b))
+            dispositions.append(EdgeDisposition(edge, "rejected", tuple(blockers)))
+            continue
+        merged = left | right
+        for member in merged:
+            component[member] = merged
+        dispositions.append(EdgeDisposition(edge, "merged"))
+
+    def member_key(i: int) -> tuple:
+        return _order_key(state.articles[i])
+
+    clusters = sorted((tuple(sorted(members, key=member_key))
+                       for members in set(component.values())),
+                      key=lambda members: [member_key(i) for i in members])
+    state.clusters = tuple(clusters)
+    state.cluster_of = {i: n for n, members in enumerate(clusters) for i in members}
+    state.edge_dispositions = tuple(dispositions)
