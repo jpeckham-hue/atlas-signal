@@ -1,14 +1,14 @@
 """Experiment 002 Stage B (relationship classification), research only.
 
 Implemented so far: loading and integrity validation of the sealed Stage A
-candidate artifact, candidate pair state, and S5 steps 1-5 (`copy_of`,
+candidate artifact, candidate pair state, S5 steps 1-5 (`copy_of`,
 template slot conflict, companion documents, advisory match, `follows_from`
-cue). S6-S11 are not implemented yet.
+cue) and S6 same-event decisions. S7-S11 are not implemented yet.
 
 Specification: docs/experiments/002-event-relationship-baseline.md, sections
 5-12 and the Stage B pre-implementation clarifications (C1-C15, R1-R5,
-G1-G6, H1-H3, T1, C16-C19). Stage B is candidate-bounded (C1): only pairs in the
-sealed Stage A candidate artifact receive decisions.
+G1-G6, H1-H3, T1, C16-C22). Stage B is candidate-bounded (C1): only pairs in
+the sealed Stage A candidate artifact receive decisions.
 """
 
 import hashlib
@@ -32,6 +32,7 @@ from .text import (
     extract_numbers,
     jaccard,
     normalize_text,
+    split_sentences,
     token_kinds,
     tokenize,
     weighted_vector,
@@ -76,7 +77,7 @@ class PairState:
     terminal: str | None = None      # terminal S5 decision, e.g. "copy_of"
     edge: str | None = None          # structural edge type, if one was created
     cannot_link: str | None = None   # cannot-link source, if any
-    s6: str | None = None            # S6 branch, if any
+    s6: tuple[str, ...] | None = None  # S6 threshold branches that fired, if decided
 
     @property
     def key(self) -> tuple[int, int]:
@@ -577,3 +578,109 @@ def apply_follows_from(state: StageBState) -> None:
             cue_article=x, cue=cue.phrase, cue_position=cue.position, cue_start=cue.start,
             cue_end=cue.end,
             antecedents=tuple(y.id for _, y in sorted(matched, key=lambda m: _order_key(m[1]))))
+
+
+# --- S6: general same-event rule ---------------------------------------------------
+
+# Threshold branch names, in the order of design section 6.
+SAME_EVENT_BRANCHES = ("full_cosine", "number_cosine", "title_cosine")
+
+
+def title_vector(article_id: int, source_id: str, model: CorpusModel) -> dict[str, float]:
+    """C11 title-only vector: the article's committed title tokens, corpus IDF
+    and the article's own source-common zero weights. No summary tokens."""
+    return weighted_vector(model.title_tokens[article_id], [], model.idf,
+                           zero_weight=model.common.get(source_id, frozenset()))
+
+
+def same_event_branches(
+    pair_cosine: float,
+    shared_distinctive_number: bool,
+    title_cosine: float,
+) -> tuple[str, ...]:
+    """The S6 threshold branches that fire, in SAME_EVENT_BRANCHES order.
+
+    Thresholds are inclusive and compared as their floats (the Stage A
+    convention).
+    """
+    fired = {
+        "full_cosine": pair_cosine >= float(rules.SAME_EVENT_COSINE),
+        "number_cosine": shared_distinctive_number
+        and pair_cosine >= float(rules.SAME_EVENT_NUMBER_COSINE),
+        "title_cosine": title_cosine >= float(rules.SAME_EVENT_TITLE_COSINE),
+    }
+    return tuple(b for b in SAME_EVENT_BRANCHES if fired[b])
+
+
+def entity_token_types(entities) -> frozenset[str]:
+    """C21: token types of an article's frozen title entity spans, tokenized
+    with the committed tokenizer."""
+    return frozenset(t for span in entities for t in tokenize(span))
+
+
+def amount_keys(article: Article, model: CorpusModel) -> frozenset[str]:
+    """Amount keys of an article from the committed number machinery.
+
+    The article's extracted amounts (``model.numbers``) plus every amount key
+    the number-expression matcher yields on the title and on each summary
+    sentence, i.e. on exactly the text units its vector tokens come from.
+    """
+    units = [article.title, *split_sentences(article.summary)]
+    return model.numbers[article.id] | frozenset(
+        k.content for text in units for k in token_kinds(text) if k.number and k.content)
+
+
+def shared_evidence_tokens(
+    vec_a: dict[str, float],
+    vec_b: dict[str, float],
+    excluded: frozenset[str],
+) -> tuple[str, ...]:
+    """C10/C20: shared token types with positive weight in both full article
+    vectors and not in ``excluded`` (amount keys and C21 entity token types of
+    either article). Sorted."""
+    return tuple(sorted(t for t in vec_a.keys() & vec_b.keys()
+                        if vec_a[t] > 0 and vec_b[t] > 0 and t not in excluded))
+
+
+def same_event_eligible(pair: PairState, a: Article, b: Article) -> bool:
+    """S6 eligibility: not terminal after S5, no cannot-link, no container, and
+    representative times at most SAME_EVENT_MAX_HOURS apart (inclusive)."""
+    if pair.terminal is not None or pair.cannot_link is not None:
+        return False
+    if a.container_flag or b.container_flag:
+        return False
+    gap = abs(a.representative_time - b.representative_time)
+    return gap <= timedelta(hours=rules.SAME_EVENT_MAX_HOURS)
+
+
+def apply_same_event(state: StageBState) -> None:
+    """S6 over sealed candidate pairs (C1) left eligible after S5.
+
+    A pair decides same-event when at least one threshold branch fires and the
+    branch-independent shared-evidence guard holds (C10, C20, C21). It gets
+    ``edge = "same_event"``, the fired branches in ``s6`` and exactly one
+    same-event edge; it is not made terminal and no cannot-link is created.
+    A failing pair is left undecided. A pair that already has an edge is
+    skipped, so a rerun changes nothing.
+    """
+    model = state.model
+    for pair in state.pairs.values():
+        if pair.edge is not None:
+            continue
+        a, b = state.articles[pair.a], state.articles[pair.b]
+        if not same_event_eligible(pair, a, b):
+            continue
+        fa, fb = state.features[a.id], state.features[b.id]
+        number = bool(model.numbers[a.id] & model.numbers[b.id] & model.distinctive)
+        title_cos = cosine(title_vector(a.id, a.source_id, model),
+                           title_vector(b.id, b.source_id, model))
+        branches = same_event_branches(pair.cosine, number, title_cos)
+        if not branches:
+            continue
+        excluded = (amount_keys(a, model) | amount_keys(b, model)
+                    | entity_token_types(fa.entities) | entity_token_types(fb.entities))
+        if not shared_evidence_tokens(fa.vector, fb.vector, excluded):
+            continue
+        pair.edge = "same_event"
+        pair.s6 = branches
+        state.edges.append(Edge("same_event", pair.a, pair.b, pair.cosine))

@@ -1,4 +1,4 @@
-"""Experiment 002 Stage B: candidate-artifact loading and S5 step 1 (`copy_of`).
+"""Experiment 002 Stage B: candidate-artifact loading, S5 steps 1-5 and S6.
 
 Synthetic fixtures only; no repository gold and no sealed real artifact.
 """
@@ -1099,6 +1099,390 @@ class FollowsFromStateTests(Fixture):
             return pending, pairs
         permuted = tuple(random.Random(8).sample(range(1, 120), 15))
         self.assertEqual(by_url(*self.run_s5()), by_url(*self.run_s5(permuted)))
+
+
+# --- S6: general same-event rule ----------------------------------------------------
+
+
+def sa(i, slug, title, summary, hour=12, day=10, minute=0, second=0, path="news",
+       source="pub-a"):
+    ts = f"2026-01-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}Z"
+    return article(i, source=source, url=f"https://example.test/{path}/{slug}", title=title,
+                   summary=summary, published_at=ts, first_seen_at=ts)
+
+
+LUMBER = "Lumber mill expansion approved by county planners after review."
+
+
+def same_event_rows(ids=tuple(range(1, 21)), second=None):
+    """Pairs (1, 2) ... (19, 20). The second article of each pair is in the
+    opinion format class, so no template slot conflict arises. ``second`` sets
+    the time of the second article as (day, hour, minute, second)."""
+    i = iter(ids)
+    t2 = dict(zip(("day", "hour", "minute", "second"), second or (10, 12, 0, 0)))
+    return [
+        # full-vector branch only
+        sa(next(i), "f1", "Kestrel remark", LUMBER),
+        sa(next(i), "f2", "Osprey memo", LUMBER, path="opinion", **t2),
+        # distinctive-number branch only
+        sa(next(i), "n1", "Plover update on quarry",
+           "Quarry fund of £7m set; granite crews wait for spring."),
+        sa(next(i), "n2", "Heron bulletin",
+           "Officials confirm £7m for quarry crews; fishermen protest loudly today.",
+           path="opinion"),
+        # title-only branch; the C10 token 'turbine' occurs only in the summaries
+        sa(next(i), "t1", "Talks with Zeta Holdings",
+           "Turbine contract signed on Monday by managers in the northern district while "
+           "auditors reviewed spreadsheets carefully and clerks filed paperwork."),
+        sa(next(i), "t2", "Visit by Zeta Holdings",
+           "Engineers inspect each turbine blade during a long snowy morning shift beside "
+           "frozen lakes and pine forests.", path="opinion"),
+        # title-only branch; only entity tokens shared
+        sa(next(i), "e1", "Talks with Omega Shipping",
+           "Copper contract signed on Monday by managers in the eastern district while "
+           "auditors reviewed ledgers slowly."),
+        sa(next(i), "e2", "Visit by Omega Shipping",
+           "Engineers inspect each kiln during a long rainy evening shift beside muddy "
+           "rivers and oak woods.", path="opinion"),
+        # entity tokens also occur outside the spans (C21, type level)
+        sa(next(i), "c1", "Talks with Delta Freight", "Delta freight managers discuss winter routes."),
+        sa(next(i), "c2", "Visit by Delta Freight", "Freight crews from delta docks rest.",
+           path="opinion"),
+        # entity span in one article only
+        sa(next(i), "o1", "Strike at Harbour Board", "Dockers walked out over pay offers."),
+        sa(next(i), "o2", "Pickets at harbour board", "Placards appeared near warehouses overnight.",
+           path="opinion"),
+        # shared amount only
+        sa(next(i), "a1", "£9m levy", "Toll booth plans."),
+        sa(next(i), "a2", "£9m charge", "Ferry fare rises.", path="opinion"),
+        # all three branches
+        sa(next(i), "g1", "Granite quarry reopens with £4m grant", "Granite quarry grant."),
+        sa(next(i), "g2", "Granite quarry reopens with £4m grant", "Quarry grant approved.",
+           path="opinion"),
+        # full-vector branch only; only entity tokens shared
+        sa(next(i), "x1", "Kestrel remark sparks debate over County Lumber Mill",
+           "County lumber mill plans drew a crowd."),
+        sa(next(i), "x2", "Osprey memo about County Lumber Mill reaches council",
+           "Questions about county lumber mill persist.", path="opinion"),
+        # number branch only; only entity tokens and the amount shared
+        sa(next(i), "y1", "Plover note on Marsh Pumping Station",
+           "Marsh pumping station receives £6m; residents cheer."),
+        sa(next(i), "y2", "Heron letter",
+           "The £6m marsh pumping station deal, critics say, arrives late for farmers "
+           "and fishing villages nearby.", path="opinion"),
+        *many_fillers(200),
+    ]
+
+
+S5_STEPS = (sb.apply_copy_of, sb.apply_slot_conflict, sb.apply_companion, sb.apply_advisory,
+            sb.apply_follows_from)
+FULL, NUMBER, TITLE = (float(rules.SAME_EVENT_COSINE), float(rules.SAME_EVENT_NUMBER_COSINE),
+                       float(rules.SAME_EVENT_TITLE_COSINE))
+
+
+def below(x):
+    return math.nextafter(x, 0.0)
+
+
+class SameEventFixture(Fixture):
+    def build(self, rows, drop=()):
+        c, model = self.load(rows)
+        artifact = json.loads(predict.canonical_json(predict.stage_a_artifact(c)))
+        artifact["candidates"] = [r for r in artifact["candidates"] if (r["a"], r["b"]) not in drop]
+        artifact["candidate_count"] = len(artifact["candidates"])
+        return c, sb.StageBState(c, model, sb.validate_candidate_artifact(artifact, c, model))
+
+    def run_s6(self, rows=None, drop=(), preset=None):
+        c, state = self.build(same_event_rows() if rows is None else rows, drop)
+        for step in S5_STEPS:
+            step(state)
+        if preset:
+            preset(state)
+        sb.apply_same_event(state)
+        return c, state
+
+    def signals(self, state, x, y):
+        """(full cosine, shared distinctive number, title cosine, C10 evidence tokens)."""
+        model, a, b = state.model, state.articles[x], state.articles[y]
+        fa, fb = state.features[x], state.features[y]
+        title = cand.cosine(sb.title_vector(x, a.source_id, model),
+                            sb.title_vector(y, b.source_id, model))
+        excluded = (sb.amount_keys(a, model) | sb.amount_keys(b, model)
+                    | sb.entity_token_types(fa.entities) | sb.entity_token_types(fb.entities))
+        return (state.pairs[(x, y)].cosine,
+                bool(model.numbers[x] & model.numbers[y] & model.distinctive), title,
+                sb.shared_evidence_tokens(fa.vector, fb.vector, excluded))
+
+    def edges_for(self, state, x, y):
+        return [e for e in state.edges if (e.a, e.b) == (x, y)]
+
+
+class SameEventRuleTests(unittest.TestCase):
+    def test_constants(self):
+        self.assertEqual(rules.SAME_EVENT_MAX_HOURS, 72)
+        self.assertEqual((rules.SAME_EVENT_COSINE, rules.SAME_EVENT_NUMBER_COSINE,
+                          rules.SAME_EVENT_TITLE_COSINE),
+                         (Fraction("0.35"), Fraction("0.15"), Fraction("0.50")))
+
+    def test_branch_boundaries_are_inclusive(self):
+        branches = sb.same_event_branches
+        self.assertEqual(branches(FULL, False, 0.0), ("full_cosine",))
+        self.assertEqual(branches(below(FULL), False, 0.0), ())
+        self.assertEqual(branches(NUMBER, True, 0.0), ("number_cosine",))
+        self.assertEqual(branches(below(NUMBER), True, 0.0), ())
+        self.assertEqual(branches(below(FULL), False, 0.0), ())   # number branch needs a number
+        self.assertEqual(branches(0.0, False, TITLE), ("title_cosine",))
+        self.assertEqual(branches(0.0, True, below(TITLE)), ())
+        self.assertEqual(branches(FULL, True, TITLE),
+                         ("full_cosine", "number_cosine", "title_cosine"))
+
+    def test_shared_evidence_helper(self):
+        u = {"port": 1.0, "crane": 2.0, "£5000000": 3.0, "zero": 0.0}
+        v = {"port": 1.0, "crane": 1.0, "£5000000": 1.0, "zero": 4.0, "other": 1.0}
+        self.assertEqual(sb.shared_evidence_tokens(u, v, frozenset()),
+                         ("crane", "port", "£5000000"))
+        excluded = frozenset({"£5000000"}) | sb.entity_token_types({"crane hire ltd"})
+        self.assertEqual(sb.shared_evidence_tokens(u, v, excluded), ("port",))
+
+    def test_entity_token_types_use_the_committed_tokenizer(self):
+        self.assertEqual(sb.entity_token_types({"bank of canada", "harbour boards"}),
+                         frozenset({"bank", "canada", "harbour", "board"}))
+        self.assertEqual(sb.entity_token_types(()), frozenset())
+
+
+class SameEventStateTests(SameEventFixture):
+    def test_preconditions(self):
+        c, state = self.run_s6()
+        expect = {  # pair: (branches that fire, has C10 evidence)
+            (1, 2): (("full_cosine",), True),
+            (3, 4): (("number_cosine",), True),
+            (5, 6): (("title_cosine",), True),
+            (7, 8): (("title_cosine",), False),
+            (9, 10): (("full_cosine", "title_cosine"), False),
+            (11, 12): (("full_cosine", "title_cosine"), False),
+            (13, 14): (("number_cosine",), False),
+            (15, 16): (("full_cosine", "number_cosine", "title_cosine"), True),
+            (17, 18): (("full_cosine",), False),
+            (19, 20): (("number_cosine",), False),
+        }
+        for (x, y), (branches, evidence) in expect.items():
+            with self.subTest(pair=(x, y)):
+                p = state.pairs[(x, y)]                  # every fixture pair is a candidate
+                self.assertEqual((p.terminal, p.cannot_link), (None, None))
+                fc, number, tc, tokens = self.signals(state, x, y)
+                self.assertEqual(sb.same_event_branches(fc, number, tc), branches)
+                self.assertEqual(bool(tokens), evidence)
+
+    def test_each_branch_decides_with_evidence(self):
+        c, state = self.run_s6()
+        for key, branches in (((1, 2), ("full_cosine",)), ((3, 4), ("number_cosine",)),
+                              ((5, 6), ("title_cosine",)),
+                              ((15, 16), ("full_cosine", "number_cosine", "title_cosine"))):
+            with self.subTest(pair=key):
+                p = state.pairs[key]
+                self.assertEqual((p.edge, p.s6, p.terminal, p.cannot_link),
+                                 ("same_event", branches, None, None))
+                self.assertEqual(self.edges_for(state, *key),
+                                 [sb.Edge("same_event", *key, p.cosine)])
+
+    def test_title_branch_evidence_from_full_vectors(self):
+        c, state = self.run_s6()
+        t5, t6 = set(state.model.title_tokens[5]), set(state.model.title_tokens[6])
+        self.assertEqual(t5 & t6, {"zeta", "holding"})          # entity tokens only
+        self.assertNotIn("turbine", t5 | t6)
+        self.assertEqual(self.signals(state, 5, 6)[3], ("turbine",))
+        self.assertEqual(state.pairs[(5, 6)].s6, ("title_cosine",))
+
+    def test_c10_failure_blocks_every_branch(self):
+        c, state = self.run_s6()
+        for key in ((17, 18),            # full branch; shared tokens are entity tokens
+                    (19, 20),            # number branch; entity tokens and the amount only
+                    (7, 8),              # title branch; entity tokens only
+                    (13, 14),            # shared amount alone
+                    (9, 10),             # C21: entity tokens also outside the spans
+                    (11, 12)):           # entity span in only one article
+            with self.subTest(pair=key):
+                p = state.pairs[key]
+                self.assertEqual((p.edge, p.s6, p.terminal, p.cannot_link),
+                                 (None, None, None, None))
+                self.assertEqual(self.edges_for(state, *key), [])
+
+    def test_c21_type_level_exclusion(self):
+        c, state = self.run_s6()
+        f9, f10 = state.features[9], state.features[10]
+        self.assertEqual(sb.entity_token_types(f9.entities), frozenset({"delta", "freight"}))
+        # 'delta' and 'freight' also occur outside the spans, in both summaries.
+        for i in (9, 10):
+            self.assertTrue({"delta", "freight"} <= set(cand.tokenize(state.articles[i].summary)))
+        self.assertEqual(set(f9.vector) & set(f10.vector), {"delta", "freight"})
+        # An entity span in article 11 only still excludes the types for the pair.
+        f11, f12 = state.features[11], state.features[12]
+        self.assertEqual(f12.entities, frozenset())
+        self.assertEqual(sb.entity_token_types(f11.entities), frozenset({"harbour", "board"}))
+        self.assertEqual(set(f11.vector) & set(f12.vector), {"harbour", "board"})
+
+    def test_entity_span_in_either_article_excludes(self):
+        # Swap IDs so the article with the span is the higher-ID side of the pair.
+        ids = (*range(1, 11), 12, 11, *range(13, 21))
+        c, state = self.run_s6(same_event_rows(ids))
+        self.assertEqual(state.features[11].entities, frozenset())
+        self.assertEqual(state.features[12].entities, frozenset({"harbour board"}))
+        p = state.pairs[(11, 12)]
+        self.assertEqual((p.edge, p.s6), (None, None))
+        self.assertEqual(self.signals(state, 11, 12)[3], ())
+
+    def test_amount_is_not_evidence(self):
+        c, state = self.run_s6()
+        a, b = state.articles[13], state.articles[14]
+        shared = set(state.features[13].vector) & set(state.features[14].vector)
+        self.assertEqual(shared, {"£9000000"})
+        self.assertIn("£9000000",
+                      sb.amount_keys(a, state.model) & sb.amount_keys(b, state.model))
+
+    def test_cosine_boundaries_through_pair_state(self):
+        for key, value, decided in (((1, 2), FULL, True), ((1, 2), below(FULL), False),
+                                    ((3, 4), NUMBER, True), ((3, 4), below(NUMBER), False)):
+            with self.subTest(pair=key, value=value):
+                def preset(state, key=key, value=value):
+                    state.pairs[key].cosine = value
+                c, state = self.run_s6(preset=preset)
+                self.assertEqual(state.pairs[key].edge == "same_event", decided)
+                self.assertEqual(len(self.edges_for(state, *key)), int(decided))
+
+    def test_time_boundary(self):
+        for second, gap_seconds, decided in (((13, 12, 0, 0), 72 * 3600, True),
+                                             ((13, 12, 0, 1), 72 * 3600 + 1, False),
+                                             ((10, 12, 0, 0), 0, True)):
+            with self.subTest(second=second):
+                c, state = self.run_s6(same_event_rows(second=second))
+                gap = state.articles[2].representative_time - state.articles[1].representative_time
+                self.assertEqual(gap.total_seconds(), gap_seconds)
+                self.assertGreaterEqual(state.pairs[(1, 2)].cosine, FULL)
+                self.assertEqual(state.pairs[(1, 2)].s6, ("full_cosine",) if decided else None)
+                self.assertEqual(len(self.edges_for(state, 1, 2)), int(decided))
+
+    def test_container_pair_skipped(self):
+        rows = same_event_rows()
+        rows[1] = sa(2, "f2", "Osprey memo", LUMBER, path="live")
+        c, state = self.run_s6(rows)
+        self.assertTrue(state.articles[2].container_flag)
+        self.assertGreaterEqual(state.pairs[(1, 2)].cosine, FULL)
+        self.assertEqual((state.pairs[(1, 2)].edge, state.pairs[(1, 2)].s6), (None, None))
+        self.assertFalse([e for e in state.edges if 2 in (e.a, e.b)])
+
+    def test_terminal_and_cannot_link_pairs_skipped(self):
+        def preset(state):
+            state.pairs[(1, 2)].terminal = "advisory_abstain"
+            state.pairs[(3, 4)].cannot_link = "follows_from"      # non-terminal
+            state.pairs[(5, 6)].terminal = sb.SLOT_CONFLICT
+            state.pairs[(5, 6)].cannot_link = sb.SLOT_CONFLICT
+        c, state = self.run_s6(preset=preset)
+        expect = {(1, 2): ("advisory_abstain", None), (3, 4): (None, "follows_from"),
+                  (5, 6): (sb.SLOT_CONFLICT, sb.SLOT_CONFLICT)}
+        for key, (terminal, cannot_link) in expect.items():
+            with self.subTest(pair=key):
+                p = state.pairs[key]
+                self.assertEqual((p.terminal, p.cannot_link, p.edge, p.s6),
+                                 (terminal, cannot_link, None, None))
+                self.assertEqual(self.edges_for(state, *key), [])
+        self.assertEqual(state.pairs[(15, 16)].edge, "same_event")   # others unaffected
+
+    def test_real_follows_from_cannot_link_skipped(self):
+        rows = same_event_rows()
+        rows[1] = sa(2, "f2", "Osprey memo after lumber mill expansion", LUMBER, hour=13,
+                     path="opinion")
+        c, state = self.run_s6(rows)
+        p = state.pairs[(1, 2)]
+        self.assertIn(1, state.pending[2].antecedents)
+        self.assertGreaterEqual(p.cosine, FULL)
+        self.assertEqual((p.terminal, p.cannot_link, p.edge, p.s6),
+                         (None, "follows_from", None, None))
+
+    def test_s5_terminal_copy_pair_keeps_its_edge_only(self):
+        rows = same_event_rows()
+        text = LUMBER + " Residents welcomed the decision at a packed evening meeting."
+        rows[0] = sa(1, "f1", "Kestrel remark", text)
+        rows[1] = sa(2, "f2", "Kestrel remark", text, hour=13)
+        c, state = self.run_s6(rows)
+        p = state.pairs[(1, 2)]
+        self.assertEqual((p.terminal, p.edge, p.s6), ("copy_of", "copy_of", None))
+        self.assertEqual([e.type for e in self.edges_for(state, 1, 2)], ["copy_of"])
+
+    def test_non_candidate_pair_untouched(self):
+        c, state = self.run_s6(drop={(1, 2)})
+        self.assertNotIn((1, 2), state.pairs)
+        self.assertEqual(self.edges_for(state, 1, 2), [])
+        self.assertEqual(state.pairs[(3, 4)].edge, "same_event")
+
+    def test_s5_results_not_mutated(self):
+        c, state = self.build(same_event_rows())
+        for step in S5_STEPS:
+            step(state)
+        before = {k: (p.terminal, p.cannot_link, p.edge) for k, p in state.pairs.items()}
+        s5_edges, pending = list(state.edges), dict(state.pending)
+        sb.apply_same_event(state)
+        self.assertEqual(state.edges[:len(s5_edges)], s5_edges)
+        self.assertEqual(state.pending, pending)
+        for k, p in state.pairs.items():
+            terminal, cannot_link, edge = before[k]
+            self.assertEqual((p.terminal, p.cannot_link), (terminal, cannot_link))
+            if edge is not None:
+                self.assertEqual((p.edge, p.s6), (edge, None))
+        new = state.edges[len(s5_edges):]
+        self.assertTrue(new and all(e.type == "same_event" for e in new))
+        self.assertEqual(len({(e.a, e.b) for e in new}), len(new))
+        self.assertEqual({(e.a, e.b) for e in new},
+                         {k for k, p in state.pairs.items() if p.edge == "same_event"})
+
+    def test_idempotent(self):
+        c, state = self.run_s6()
+        before = (copy.deepcopy(state.pairs), list(state.edges), dict(state.pending))
+        sb.apply_same_event(state)
+        self.assertEqual((state.pairs, state.edges, state.pending), before)
+
+    def test_article_id_permutation(self):
+        def by_url(c, state):
+            url = {a.id: a.normalized_url for a in c.articles}
+            pairs = {tuple(sorted((url[p.a], url[p.b]))): (p.terminal, p.cannot_link, p.edge, p.s6)
+                     for p in state.pairs.values()}
+            edges = sorted((e.type, *sorted((url[e.a], url[e.b])), e.cosine) for e in state.edges)
+            return pairs, edges
+        permuted = tuple(random.Random(6).sample(range(1, 150), 20))
+        self.assertEqual(by_url(*self.run_s6()), by_url(*self.run_s6(same_event_rows(permuted))))
+
+
+class SameEventSourceCommonTests(SameEventFixture):
+    """'harbour' is source-common in gov-b only (3 of 10 gov-b articles)."""
+
+    def rows(self):
+        return [
+            *[sa(k, f"g{k}", f"Gov item{k}z", "Plain note.", source="gov-b") for k in range(1, 8)],
+            sa(8, "h8", "Harbour £5m", "Harbour levy.", source="gov-b"),
+            sa(9, "h9", "Harbour toll", "Harbour gate.", source="gov-b"),
+            sa(10, "h10", "Harbour fees rise", "Harbour fees.", source="gov-b"),
+            sa(11, "p11", "Harbour £5m", "Harbour charge.", path="opinion"),
+            sa(12, "p12", "Harbour cost", "Harbour cost £5m."),
+            *many_fillers(200),
+        ]
+
+    def test_each_article_uses_its_own_zero_weights(self):
+        c, state = self.run_s6(self.rows())
+        model = state.model
+        self.assertIn("harbour", model.common["gov-b"])
+        self.assertNotIn("harbour", model.common["pub-a"])
+        self.assertNotIn("harbour", sb.title_vector(8, "gov-b", model))
+        self.assertIn("harbour", sb.title_vector(11, "pub-a", model))
+        self.assertNotIn("harbour", state.features[8].vector)
+        self.assertIn("harbour", state.features[11].vector)
+        # gov-b with pub-a: the number branch fires, but 'harbour' has zero weight
+        # in the gov-b article and the amount is excluded, so C10 fails.
+        fc, number, tc, tokens = self.signals(state, 8, 11)
+        self.assertTrue(number and fc >= NUMBER)
+        self.assertEqual(tokens, ())
+        self.assertEqual((state.pairs[(8, 11)].edge, state.pairs[(8, 11)].s6), (None, None))
+        # Two pub-a articles: 'harbour' has positive weight in both and qualifies.
+        self.assertEqual(self.signals(state, 11, 12)[3], ("harbour",))
+        self.assertEqual(state.pairs[(11, 12)].edge, "same_event")
 
 
 if __name__ == "__main__":
