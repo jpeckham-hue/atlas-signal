@@ -903,6 +903,41 @@ Stage B prediction or gold evaluation:
   conservative, order-independent resolution of an otherwise possible
   directional cycle, not chosen from observed Stage B performance.
 
+Pre-implementation clarifications, discovered during the read-only S6/S7
+boundary review after S5 was fully implemented (checkpoint
+`8b8b75eb19e5077dfd779bd954f1cc30acef26ed`) and before any S6 or S7 code, real
+Stage B execution or gold evaluation. C20–C22 are conservative, deterministic
+resolutions of specification gaps; they were not selected from observed Stage B
+performance:
+
+- **C20 — C10 uses full-article weighted evidence.** C10 is a
+  branch-independent guard on every S6 same-event decision. Whichever threshold
+  branch fires (full-vector cosine ≥ `SAME_EVENT_COSINE`; shared distinctive
+  number and full-vector cosine ≥ `SAME_EVENT_NUMBER_COSINE`; or title-only
+  cosine ≥ `SAME_EVENT_TITLE_COSINE`), the required shared positive-weight
+  non-amount content token is evaluated on the two articles' full committed
+  article vectors, each built with that article's own committed source-common
+  zero weights. Under the title-only branch the C10 evidence token need not
+  occur in both titles. The three threshold branches and their thresholds are
+  unchanged.
+- **C21 — C10 entity exclusion is token-type-level.** For each article, the
+  set of normalized, tokenized token types occurring in its frozen title entity
+  spans is constructed. A token type is ineligible to satisfy C10 if it occurs
+  in an entity span of either article. The exclusion is by type, not by
+  occurrence: a token such as `port` that appears inside an entity span and
+  also separately outside it still cannot be the C10 shared-evidence token for
+  that pair. The qualifying token must otherwise be non-amount and have positive
+  weight in both full article vectors (C20). No positional occurrence tracking
+  is introduced for C10.
+- **C22 — Complete S7 non-ID edge tie-break.** C8's edge-type priority is
+  unchanged: `copy_of` → companion → advisory → same-event (S6); within an edge
+  type, edges are processed by cosine descending. For equal cosine, each
+  article's ordering key is `(representative_time, normalized_url)`; an edge's
+  two article keys are sorted ascending, and the resulting ordered two-key
+  tuple is the final lexicographic edge tie-break. This totally orders distinct
+  edges without article IDs. No insertion order, article ID, pair ID,
+  candidate-artifact order or other implementation-dependent tie-break is used.
+
 **Provenance.** The Stage B prediction artifact records the frozen corpus,
 candidate-artifact and Stage A configuration identities and a Stage B
 specification/configuration hash. It does not need to contain the commit hash
