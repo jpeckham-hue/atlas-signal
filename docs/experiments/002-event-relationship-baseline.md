@@ -980,6 +980,30 @@ clarifications.
   so never take part in this comparison. G2 processing order, positive
   evidence qualification, blocking and event membership are unchanged.
 
+Pre-implementation clarification, discovered during the read-only S9
+implementation mapping after S8 was implemented and pushed (checkpoint
+`ff1d8794126c4fa381b5bfe4dd51b69f2e3777b6`) and before any S9 code, real
+Stage B prediction or gold evaluation. C25 is a semantic reading of the frozen
+section 8 and C13 cue wording, chosen for determinism and consistency with the
+existing literal cue matching, not from observed Stage B performance:
+
+- **C25 — Role cue matching granularity.** The `anticipates` title phrases
+  `to make an announcement` and `to announce` match as whole-token phrases on
+  the normalized title: the phrase's words in order, separated by whitespace,
+  with no letter or digit immediately before or after the phrase. The phrase
+  may occur anywhere in the normalized title, not only at its beginning. A
+  phrase embedded in longer words does not match (for example, `to announcer` or
+  `to announced`). The C13 explainer test uses the first word token of the
+  normalized title: leading punctuation is ignored and stopwords are retained,
+  so the token is `why`, `how` or `what` exactly, and longer words such as
+  `however` or `whatever` do not match. *Accepted consequence:* the frozen
+  normalization removes `'s` after a word, so a title beginning `What's` has
+  first word token `what`. The cue vocabulary, the role precedence
+  (`anticipates` > `discusses` > `reports`) and the document-type and
+  format-class role rules are unchanged, and no role heuristic is added. R5 is
+  unchanged: every container membership has role `reports`, whatever other
+  role evidence the container carries.
+
 **Provenance.** The Stage B prediction artifact records the frozen corpus,
 candidate-artifact and Stage A configuration identities and a Stage B
 specification/configuration hash. It does not need to contain the commit hash
