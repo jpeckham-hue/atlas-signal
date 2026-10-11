@@ -1,4 +1,4 @@
-"""Experiment 002 Stage B: candidate-artifact loading, S5 steps 1-5, S6 and S7.
+"""Experiment 002 Stage B: candidate-artifact loading, S5 steps 1-5 and S6-S8.
 
 Synthetic fixtures only; no repository gold and no sealed real artifact.
 """
@@ -1777,6 +1777,449 @@ class ClusteringPipelineTests(SameEventFixture):
             self.assertTrue(all(state.cluster_of[i] == n for i in cluster))
         for x, y in ((1, 2), (3, 4), (5, 6), (15, 16)):
             self.assertEqual(state.cluster_of[x], state.cluster_of[y])
+
+
+# --- S8: container attachment --------------------------------------------------------
+
+
+def gov_fillers(start, n=30):
+    return [article(start + k, source="gov-b", url=f"https://example.test/gov/m{k}",
+                    title=f"Memo item{k}w", summary=f"Text entry{k}v only.",
+                    published_at="2026-01-10T08:00:00Z")
+            for k in range(n)]
+
+
+class AttachFixture(Fixture):
+    """Hand-built S5 state, then S7 and S8, over a synthetic corpus.
+
+    ``specs`` maps slug -> article fields (title, summary, hour, path, source);
+    a ``live`` path makes a container. ``pairs`` are sealed candidate pairs
+    ``(x, y[, cannot_link])``, ``edges`` are structural edges ``(type, x, y)``.
+    Fillers dilute source-common tokens; 'note' is source-common in pub-a only.
+    """
+
+    def world(self, specs, pairs=(), edges=(), vectors=None, ids=None, pending=(), s8=True):
+        ids = ids or tuple(range(1, len(specs) + 1))
+        rows, self.id = [], {}
+        for i, (slug, spec) in zip(ids, specs.items()):
+            spec = dict(spec)
+            title, summary = spec.pop("title"), spec.pop("summary", "")
+            rows.append(sa(i, slug, title, summary, **spec))
+            self.id[slug] = i
+        rows += many_fillers(500) + gov_fillers(600)
+        c, model = self.load(rows)
+        state = sb.StageBState(c, model, {})
+        self.slug = {i: s for s, i in self.id.items()}
+        for slug, vector in (vectors or {}).items():
+            i = self.id[slug]
+            state.features[i] = dataclasses.replace(state.features[i], vector=vector)
+        for x, y, *cannot_link in pairs:
+            a, b = sorted((self.id[x], self.id[y]))
+            state.pairs[(a, b)] = sb.PairState(
+                a=a, b=b, cosine=cand.cosine(state.features[a].vector, state.features[b].vector),
+                routes=("lexical_cosine",), cannot_link=cannot_link[0] if cannot_link else None)
+        state.pairs = dict(sorted(state.pairs.items()))
+        for kind, x, y in edges:
+            a, b = sorted((self.id[x], self.id[y]))
+            state.pairs[(a, b)].edge = kind
+            state.edges.append(sb.Edge(kind, a, b, state.pairs[(a, b)].cosine))
+        for x in pending:
+            state.pending[self.id[x]] = sb.PendingRelation(self.id[x], "after", 0, 0, 0, ())
+        sb.apply_clustering(state)
+        if s8:
+            sb.apply_container_attachments(state)
+        return state
+
+    def name(self, i):
+        return self.slug.get(i, i)
+
+    def ev(self, state, n):
+        """Event by slug: ('s7', members) or ('clause', container, position)."""
+        if n is None:
+            return None
+        origin = state.events[n].origin
+        if origin[0] == "s7":
+            return ("s7", tuple(self.name(i) for i in state.clusters[origin[1]]))
+        return ("clause", self.name(origin[1]), origin[2])
+
+    def members(self, state, n):
+        return tuple(self.name(i) for i in state.events[n].members)
+
+    def event_of(self, state, slug):
+        return state.cluster_of[self.id[slug]]
+
+    def units(self, state):
+        return [(self.name(u.container), u.kind, u.position, u.status, self.ev(state, u.event),
+                 self.name(u.member) if u.member is not None else None) for u in state.units]
+
+    def unit(self, state, container, kind, position):
+        found = [u for u in state.units if (self.name(u.container), u.kind, u.position)
+                 == (container, kind, position)]
+        self.assertEqual(len(found), 1)
+        return found[0]
+
+    def container_only(self, state):
+        return [self.ev(state, n) for n, e in enumerate(state.events) if e.container_only]
+
+
+def spec(title, hour=12, path="news", source="pub-a", summary=""):
+    return dict(title=title, hour=hour, path=path, source=source, summary=summary)
+
+
+QUARRY = "Quarry flooding halts output at the granite site"
+HARBOUR = "Harbour strike widens across eastern docks"
+
+
+class TitleClauseTests(unittest.TestCase):
+    def pieces(self, title):
+        return [(p.position, p.text) for p in sb.title_pieces(title)]
+
+    def test_split_points(self):
+        self.assertEqual(self.pieces("Markets live: shares fall; rally after vote – as it happened"),
+                         [(0, "markets live: shares fall"), (1, "rally"), (2, "vote"),
+                          (3, "as it happened")])
+        for cue in sb.FOLLOWS_FROM_CUES:
+            with self.subTest(cue=cue):
+                self.assertEqual(self.pieces(f"Rally {cue} vote"), [(0, "rally"), (1, "vote")])
+        # No split at colons, unspaced dashes or cue substrings.
+        self.assertEqual(self.pieces("Thereafter calm: afternoon session—live"),
+                         [(0, "thereafter calm: afternoon session-live")])
+
+    def test_empty_and_no_content_clauses_dropped(self):
+        self.assertEqual([(p.position, p.text) for p in sb.title_clauses("After the vote; calm")],
+                         [(1, "the vote"), (2, "calm")])
+        self.assertEqual([p.position for p in sb.title_clauses("Quarry ; the ; ; harbour")],
+                         [0, 3])
+
+    def test_head_clause_position(self):
+        self.assertEqual(sb.head_clause_position("Business live – markets fall after rate rise"), 1)
+        self.assertEqual(sb.head_clause_position("Rally after vote; calm after storm"), 0)
+        self.assertIsNone(sb.head_clause_position("Markets fall; the after vote"))
+        self.assertIsNone(sb.head_clause_position("After vote, markets fall"))
+        self.assertIsNone(sb.head_clause_position("Markets fall on vote"))
+
+
+class AttachmentTests(AttachFixture):
+    def test_title_clause_attaches(self):
+        s = self.world({"k": spec("Quarry flooding halts output - live", 9),
+                        "q": spec(QUARRY), "h": spec(HARBOUR)}, pairs=[("k", "q"), ("k", "h")])
+        self.assertTrue(s.articles[self.id["k"]].container_flag)
+        self.assertEqual(self.units(s)[0][:6], ("k", "title", 0, "attached", ("s7", ("q",)), "q"))
+        self.assertEqual(self.members(s, self.event_of(s, "q")), ("k", "q"))
+        self.assertNotIn(self.id["k"], s.cluster_of)
+
+    def test_summary_sentence_attaches_and_unmatched_summary_creates_nothing(self):
+        s = self.world({"k": spec("Walrus yonder bulletin", 9, path="live",
+                                  summary="Quarry flooding halts output. Glacier lantern meadow."),
+                        "q": spec(QUARRY)}, pairs=[("k", "q")])
+        self.assertEqual(self.units(s), [
+            ("k", "title", 0, "unmatched_container_only", ("clause", "k", 0), None),
+            ("k", "summary", 0, "attached", ("s7", ("q",)), "q"),
+            ("k", "summary", 1, "unmatched_summary", None, None)])
+        self.assertEqual(self.container_only(s), [("clause", "k", 0)])
+        self.assertEqual(len(s.events), len(s.clusters) + 1)
+
+    def test_suppressed_summary_text_is_not_a_unit(self):
+        boiler = "This boilerplate sentence about quarry flooding halts output at the site daily."
+        specs = {"k": spec("Walrus yonder bulletin", 9, path="live", summary=boiler),
+                 "q": spec(QUARRY),
+                 "z": spec("Zephyr other note", 8, summary=boiler)}
+        s = self.world(specs, pairs=[("k", "q")])
+        self.assertEqual(s.model.sentence_tokens[self.id["k"]], ((),))
+        self.assertEqual([u.kind for u in s.units], ["title"])
+
+    def test_unmatched_title_clauses_each_create_an_event(self):
+        s = self.world({"k": spec("Walrus yonder; zephyr thistle", 9, path="live"),
+                        "q": spec(QUARRY)}, pairs=[("k", "q")])
+        self.assertEqual(self.container_only(s), [("clause", "k", 0), ("clause", "k", 1)])
+        a, b = [n for n, e in enumerate(s.events) if e.container_only]
+        self.assertEqual(s.events[a].members, s.events[b].members)
+        self.assertNotEqual(a, b)
+
+    def test_marker_clause_with_empty_vector_is_retained(self):
+        s = self.world({"k": spec("Quarry flooding halts output - note", 9, path="live"),
+                        "q": spec(QUARRY)}, pairs=[("k", "q")])
+        self.assertIn("note", s.model.common["pub-a"])
+        self.assertEqual(sb.clause_vector("note", "pub-a", s.model), {})
+        self.assertEqual(self.unit(s, "k", "title", 1).status, "unmatched_container_only")
+
+    def test_highest_member_cosine_is_the_score(self):
+        # The better member q comes after r in key order.
+        s = self.world({"k": spec("Quarry flooding halts output", 9, path="live"),
+                        "q": spec(QUARRY, 13), "r": spec("Quarry flooding report from the north", 11)},
+                       pairs=[("k", "q"), ("k", "r"), ("q", "r")], edges=[("same_event", "q", "r")])
+        u = self.unit(s, "k", "title", 0)
+        vec = sb.clause_vector("quarry flooding halts output", "pub-a", s.model)
+        cos = {m: cand.cosine(vec, s.features[self.id[m]].vector) for m in "qr"}
+        self.assertGreater(cos["q"], cos["r"])
+        self.assertGreaterEqual(cos["r"], float(rules.CONTAINER_CLAUSE_COSINE))
+        self.assertEqual(self.members(s, u.event), ("k", "r", "q"))
+        self.assertEqual((self.name(u.member), u.similarity), ("q", cos["q"]))
+
+    def test_equal_member_cosine_uses_article_key(self):
+        same = {"quarry": 1.0, "flooding": 1.0}
+        for ids in ((1, 2, 3), (1, 3, 2)):
+            with self.subTest(ids=ids):
+                s = self.world({"k": spec("Quarry flooding", 9, path="live"),
+                                "q": spec("Quarry one", 13), "r": spec("Quarry two", 11)},
+                               pairs=[("k", "q"), ("k", "r"), ("q", "r")],
+                               edges=[("same_event", "q", "r")], vectors={"q": same, "r": same},
+                               ids=ids)
+                self.assertEqual(self.name(self.unit(s, "k", "title", 0).member), "r")
+
+    def test_competing_events_choose_higher_score(self):
+        s = self.world({"k": spec("Quarry flooding halts output", 9, path="live"),
+                        "q": spec(QUARRY), "r": spec("Quarry flooding report from the north")},
+                       pairs=[("k", "q"), ("k", "r")])
+        u = self.unit(s, "k", "title", 0)
+        self.assertEqual([self.ev(s, q.event) for q in u.qualified],
+                         [("s7", ("q",)), ("s7", ("r",))])
+        self.assertEqual(self.ev(s, u.event), ("s7", ("q",)))
+
+    def tie_world(self, early_container, ids=None):
+        same = {"quarry": 1.0, "flooding": 1.0}
+        specs = {"k": spec("Quarry flooding", 9, path="live"),
+                 "q": spec("Quarry one", 12), "r": spec("Quarry two", 11),
+                 "j": spec("Quarry flooding again", 8 if early_container else 10, path="live")}
+        return self.world(specs, pairs=[("k", "q"), ("k", "r"), ("j", "q")],
+                          vectors={"q": same, "r": same}, ids=ids)
+
+    def test_h2_tie_uses_current_working_membership(self):
+        # Equal scores. S7 keys: r (11:00) < q (12:00), so r's event wins ...
+        s = self.tie_world(early_container=False)
+        u = self.unit(s, "k", "title", 0)
+        self.assertEqual(u.qualified[0].similarity, u.qualified[1].similarity)
+        self.assertEqual(self.ev(s, u.event), ("s7", ("r",)))
+        # ... unless container j (08:00) attached to q's event first (C24).
+        for ids in (None, (4, 3, 2, 1)):
+            with self.subTest(ids=ids):
+                s = self.tie_world(early_container=True, ids=ids)
+                self.assertEqual(self.ev(s, self.unit(s, "j", "title", 0).event), ("s7", ("q",)))
+                self.assertEqual(self.ev(s, self.unit(s, "k", "title", 0).event), ("s7", ("q",)))
+
+    def test_candidate_partner_required(self):
+        specs = {"k": spec("Quarry flooding halts output", 9, path="live"), "q": spec(QUARRY)}
+        s = self.world(specs)
+        self.assertEqual(self.unit(s, "k", "title", 0).status, "unmatched_container_only")
+        s = self.world(specs, pairs=[("k", "q")])
+        self.assertEqual(self.unit(s, "k", "title", 0).status, "attached")
+
+    def test_non_candidate_member_cannot_qualify_an_event(self):
+        # q and r share an event; only r is a candidate partner and r fails the
+        # evidence condition, so the event does not qualify.
+        s = self.world({"k": spec("Quarry flooding halts output", 9, path="live"),
+                        "q": spec(QUARRY), "r": spec("Walrus zephyr note")},
+                       pairs=[("k", "r"), ("q", "r")], edges=[("same_event", "q", "r")])
+        self.assertEqual(self.unit(s, "k", "title", 0).status, "unmatched_container_only")
+
+    def slot_world(self, conflict):
+        # A date round-up container keeps the standard format class, so it shares
+        # a template scope with ordinary pub-a articles.
+        other = "Acme daily briefing" if conflict else "Acme quarry report"
+        return self.world({"k": spec("10 January daily briefing", 9,
+                                     summary="Quarry flooding halts output."),
+                           "q": spec(QUARRY, source="gov-b"), "s": spec(other, 13)},
+                          pairs=[("k", "q"), ("q", "s")], edges=[("same_event", "q", "s")])
+
+    def test_non_candidate_slot_conflict_blocks(self):
+        s = self.slot_world(conflict=True)
+        k, member = s.articles[self.id["k"]], s.articles[self.id["s"]]
+        self.assertTrue(k.container_flag and sb.slot_conflict(k, member))
+        u = self.unit(s, "k", "summary", 0)
+        self.assertEqual(u.status, "blocked")
+        self.assertEqual([(self.name(b.x), self.name(b.y), b.kind, b.detail, b.candidate)
+                          for b in u.qualified[0].blockers],
+                         [("k", "s", "cannot_link", sb.SLOT_CONFLICT, False)])
+        self.assertEqual(self.name(u.qualified[0].member), "q")   # a different member qualifies
+        self.assertEqual(self.unit(self.slot_world(conflict=False), "k", "summary", 0).status,
+                         "attached")
+
+    def test_candidate_cannot_link_blocks_without_container_only_event(self):
+        s = self.world({"k": spec("Quarry flooding halts output", 9, path="live"),
+                        "q": spec(QUARRY), "s": spec("Quarry crews rest", 13)},
+                       pairs=[("k", "q"), ("k", "s", "follows_from"), ("q", "s")],
+                       edges=[("same_event", "q", "s")])
+        u = self.unit(s, "k", "title", 0)
+        self.assertEqual((u.status, u.event), ("blocked", None))
+        self.assertEqual([(self.name(b.y), b.detail, b.candidate) for b in u.qualified[0].blockers],
+                         [("s", "follows_from", True)])
+        self.assertEqual(self.container_only(s), [])
+        self.assertNotIn(self.id["k"], s.events[self.event_of(s, "q")].members)
+
+    def test_lower_unblocked_event_wins(self):
+        s = self.world({"k": spec("Quarry flooding halts output", 9, path="live"),
+                        "q": spec(QUARRY), "r": spec("Quarry flooding report from the north")},
+                       pairs=[("k", "q", "follows_from"), ("k", "r")])
+        u = self.unit(s, "k", "title", 0)
+        self.assertGreater(u.qualified[0].similarity, u.qualified[1].similarity)
+        self.assertEqual((u.status, self.ev(s, u.event)), ("attached", ("s7", ("r",))))
+
+    def g2_world(self, k1_hour, k2_hour, ids=None):
+        return self.world({"k1": spec("Quarry flooding halts output", k1_hour, path="live"),
+                           "k2": spec("Quarry flooding halts output today", k2_hour, path="live"),
+                           "q": spec(QUARRY)},
+                          pairs=[("k1", "q"), ("k2", "q"), ("k1", "k2", "follows_from")], ids=ids)
+
+    def test_earlier_attached_container_blocks_later_one(self):
+        for k1, k2, first, ids in ((8, 9, "k1", None), (9, 8, "k2", None), (8, 9, "k1", (3, 2, 1))):
+            with self.subTest(k1=k1, k2=k2, ids=ids):
+                s = self.g2_world(k1, k2, ids)
+                second = "k2" if first == "k1" else "k1"
+                self.assertEqual(self.unit(s, first, "title", 0).status, "attached")
+                u = self.unit(s, second, "title", 0)
+                self.assertEqual(u.status, "blocked")
+                self.assertEqual([(self.name(b.x), self.name(b.y), b.candidate)
+                                  for b in u.qualified[0].blockers], [(first, second, True)])
+                self.assertEqual(self.members(s, self.event_of(s, "q")), (first, "q"))
+
+    def test_container_joins_several_events_without_merging(self):
+        s = self.world({"k": spec("Quarry flooding halts output; harbour strike widens", 9,
+                                  path="live", summary="Quarry flooding halts output."),
+                        "q": spec(QUARRY), "h": spec(HARBOUR)}, pairs=[("k", "q"), ("k", "h")])
+        self.assertEqual([u[3:5] for u in self.units(s)],
+                         [("attached", ("s7", ("q",))), ("attached", ("s7", ("h",))),
+                          ("attached", ("s7", ("q",)))])
+        self.assertEqual(self.members(s, self.event_of(s, "q")), ("k", "q"))   # once
+        self.assertEqual(self.members(s, self.event_of(s, "h")), ("k", "h"))
+        self.assertNotEqual(self.event_of(s, "q"), self.event_of(s, "h"))
+        self.assertEqual(len(s.events), len(s.clusters))
+
+    def test_branch_a_below_cosine_threshold(self):
+        specs = {"k": spec("Harbour £7m", 9, path="live"),
+                 "q": spec("Harbour fund of £7m set as granite crews wait for spring rains",
+                           summary="Orchard owners, ferry pilots and glacier guides met in the "
+                                   "village hall to discuss lantern repairs.")}
+        s = self.world(specs, pairs=[("k", "q")])
+        self.assertIn("£7000000", s.model.distinctive)
+        u = self.unit(s, "k", "title", 0)
+        self.assertEqual(u.status, "attached")
+        self.assertLess(u.similarity, float(rules.CONTAINER_CLAUSE_COSINE))
+
+    def test_branch_a_needs_a_non_amount_token(self):
+        specs = {"k": spec("Walrus £7m", 9, path="live"),
+                 "q": spec("Harbour fund of £7m set as granite crews wait for spring rains")}
+        s = self.world(specs, pairs=[("k", "q")])
+        self.assertEqual(self.unit(s, "k", "title", 0).status, "unmatched_container_only")
+
+    def test_branch_a_source_common_token_does_not_count(self):
+        member = "Note on £7m fund as granite crews wait for spring rains and supplies"
+        common = self.world({"k": spec("Note £7m", 9, path="live"),
+                             "q": spec(member, source="gov-b")}, pairs=[("k", "q")])
+        self.assertIn("note", common.features[self.id["q"]].vector)
+        self.assertEqual(self.unit(common, "k", "title", 0).status, "unmatched_container_only")
+        plain = self.world({"k": spec("Fund £7m", 9, path="live"),
+                            "q": spec(member, source="gov-b")}, pairs=[("k", "q")])
+        self.assertEqual(self.unit(plain, "k", "title", 0).status, "attached")
+
+    def test_branch_b_boundary(self):
+        specs = {"k": spec("Quarry", 9, path="live"), "q": spec("Other words entirely")}
+        probe = self.world(specs, pairs=[("k", "q")], s8=False)
+        w = sb.clause_vector("quarry", "pub-a", probe.model)["quarry"]
+        at = {"quarry": 2.0, "a": 4.0, "b": 2.0, "c": 1.0}          # norm 5, cosine 2/5
+        self.assertEqual(cand.cosine({"quarry": w}, at), float(rules.CONTAINER_CLAUSE_COSINE))
+        s = self.world(specs, pairs=[("k", "q")], vectors={"q": at})
+        self.assertEqual(self.unit(s, "k", "title", 0).status, "attached")
+        below = dict(at, d=0.01)
+        s = self.world(specs, pairs=[("k", "q")], vectors={"q": below})
+        self.assertEqual(self.unit(s, "k", "title", 0).status, "unmatched_container_only")
+
+
+class HeadClauseTests(AttachFixture):
+    def head(self, s, container="k"):
+        h = s.heads.get(self.id[container])
+        return None if h is None else (h.position, self.ev(s, h.event))
+
+    def test_immediately_preceding_clause_not_the_first(self):
+        s = self.world({"k": spec("Quarry flooding halts output – walrus yonder after harbour strike",
+                                  9, path="live"),
+                        "q": spec(QUARRY), "h": spec(HARBOUR)},
+                       pairs=[("k", "q"), ("k", "h")], pending=["k"])
+        self.assertEqual(self.unit(s, "k", "title", 0).status, "attached")
+        self.assertEqual(self.head(s), (1, ("clause", "k", 1)))   # unmatched head: own event
+
+    def test_attached_head(self):
+        s = self.world({"k": spec("Walrus yonder; quarry flooding halts output after vote", 9,
+                                  path="live"), "q": spec(QUARRY)},
+                       pairs=[("k", "q")], pending=["k"])
+        self.assertEqual(self.head(s), (1, ("s7", ("q",))))
+
+    def test_no_retained_preceding_clause(self):
+        for title in ("Quarry flooding halts output; the after vote",
+                      "After quarry flooding, output halts"):
+            with self.subTest(title=title):
+                s = self.world({"k": spec(title, 9, path="live",
+                                          summary="Quarry flooding halts output."),
+                                "q": spec(QUARRY)}, pairs=[("k", "q")], pending=["k"])
+                self.assertEqual(self.head(s), (None, None))
+                self.assertEqual(self.unit(s, "k", "summary", 0).status, "attached")
+
+    def test_blocked_head_has_no_event(self):
+        s = self.world({"k": spec("Quarry flooding halts output after vote", 9, path="live",
+                                  summary="Quarry flooding halts output."),
+                        "q": spec(QUARRY)}, pairs=[("k", "q", "follows_from")], pending=["k"])
+        self.assertEqual(self.unit(s, "k", "title", 0).status, "blocked")
+        self.assertEqual(self.head(s), (0, None))
+
+    def test_only_containers_with_pending_claims(self):
+        s = self.world({"k": spec("Quarry flooding halts output after vote", 9, path="live"),
+                        "q": spec(QUARRY)}, pairs=[("k", "q")])
+        self.assertEqual(s.heads, {})
+
+
+class AttachmentDeterminismTests(AttachFixture):
+    SPECS = {"k1": spec("Quarry flooding halts output; walrus yonder after harbour strike", 9,
+                        path="live", summary="Harbour strike widens. Glacier lantern meadow."),
+             "k2": spec("Quarry flooding halts output today", 8, path="live"),
+             "q": spec(QUARRY), "h": spec(HARBOUR, 11), "r": spec("Quarry crews rest", 13)}
+    PAIRS = [("k1", "q"), ("k1", "h"), ("k2", "q"), ("k1", "k2", "follows_from"), ("q", "r")]
+
+    def run_world(self, ids=None, shuffle=None):
+        s = self.world(self.SPECS, self.PAIRS, edges=[("same_event", "q", "r")], ids=ids,
+                       pending=["k1"], s8=False)
+        if shuffle is not None:
+            random.Random(shuffle).shuffle(s.edges)
+            sb.apply_clustering(s)
+        sb.apply_container_attachments(s)
+        return s
+
+    def summary(self, s):
+        events = [(self.ev(s, n), self.members(s, n), e.container_only)
+                  for n, e in enumerate(s.events)
+                  if e.container_only or set(e.members) & set(self.id.values())]
+        units = [(*u, tuple((self.ev(s, q.event), self.name(q.member), q.similarity,
+                             tuple((self.name(b.x), self.name(b.y), b.detail) for b in q.blockers))
+                            for q in s.units[n].qualified))
+                 for n, u in enumerate(self.units(s))]
+        return events, units, self.head_of(s)
+
+    def head_of(self, s):
+        h = s.heads[self.id["k1"]]
+        return h.position, self.ev(s, h.event)
+
+    def test_article_id_permutation(self):
+        first = self.summary(self.run_world())
+        self.assertEqual(first, self.summary(self.run_world(ids=(41, 7, 23, 3, 15))))
+        self.assertEqual(first[1][0][3], "attached")       # k2 (08:00) first
+        self.assertEqual(first[1][1][3], "blocked")        # k1 blocked by k2
+
+    def test_incoming_edge_order(self):
+        self.assertEqual(self.summary(self.run_world(shuffle=1)), self.summary(self.run_world()))
+
+    def test_rerun_idempotent_and_inputs_unchanged(self):
+        s = self.run_world()
+        before = (copy.deepcopy(s.pairs), list(s.edges), s.clusters, dict(s.cluster_of),
+                  s.edge_dispositions)
+        result = (s.events, s.units, dict(s.heads))
+        sb.apply_container_attachments(s)
+        self.assertEqual((s.events, s.units, s.heads), result)
+        self.assertEqual((s.pairs, s.edges, s.clusters, s.cluster_of, s.edge_dispositions),
+                         before)
+
+    def test_s7_required(self):
+        s = self.world(self.SPECS, self.PAIRS, s8=False)
+        s.cluster_of = {}
+        with self.assertRaises(ValueError):
+            sb.apply_container_attachments(s)
 
 
 if __name__ == "__main__":

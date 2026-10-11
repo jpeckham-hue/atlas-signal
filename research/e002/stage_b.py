@@ -3,12 +3,12 @@
 Implemented so far: loading and integrity validation of the sealed Stage A
 candidate artifact, candidate pair state, S5 steps 1-5 (`copy_of`,
 template slot conflict, companion documents, advisory match, `follows_from`
-cue), S6 same-event decisions and S7 constrained clustering. S8-S11 are not
-implemented yet.
+cue), S6 same-event decisions, S7 constrained clustering and S8 container
+attachment. S9-S11 are not implemented yet.
 
 Specification: docs/experiments/002-event-relationship-baseline.md, sections
 5-12 and the Stage B pre-implementation clarifications (C1-C15, R1-R5,
-G1-G6, H1-H3, T1, C16-C22). Stage B is candidate-bounded (C1): only pairs in
+G1-G6, H1-H3, T1, C16-C24). Stage B is candidate-bounded (C1): only pairs in
 the sealed Stage A candidate artifact receive decisions.
 """
 
@@ -106,6 +106,10 @@ class StageBState:
     clusters: tuple[tuple[int, ...], ...] = ()     # non-container articles, key-ordered
     cluster_of: dict[int, int] = field(default_factory=dict)  # article -> index in clusters
     edge_dispositions: tuple["EdgeDisposition", ...] = ()     # in processing order
+    # S8 output, replaced on every apply_container_attachments call.
+    events: tuple["S8Event", ...] = ()             # S7-derived first, by cluster index
+    units: tuple["AttachmentUnit", ...] = ()       # in processing order
+    heads: dict[int, "HeadEvent"] = field(default_factory=dict)  # by container cue article
 
     def __post_init__(self):
         self.articles: dict[int, Article] = {a.id: a for a in self.corpus.articles}
@@ -819,3 +823,196 @@ def apply_clustering(state: StageBState) -> None:
     state.clusters = tuple(clusters)
     state.cluster_of = {i: n for n, members in enumerate(clusters) for i in members}
     state.edge_dispositions = tuple(dispositions)
+
+
+# --- S8: container attachment ------------------------------------------------------
+
+# C4 split points: semicolon, spaced dash (after normalization) and every frozen
+# follows_from cue as a whole token. Colons and unspaced dashes do not split.
+_CLAUSE_DELIMITERS = (re.compile(r";"), re.compile(r"\s-\s"),
+                      *(pattern for _, pattern in _CUE_PATTERNS))
+
+
+@dataclass(frozen=True)
+class TitlePiece:
+    """One piece of a normalized container title between split points (C4)."""
+
+    position: int    # index among all pieces of the title, in title order
+    text: str        # normalized, stripped
+    end: int         # offset in the normalized title where the next split point starts
+
+
+def title_pieces(title: str | None) -> list[TitlePiece]:
+    """The normalized title cut at every C4 split point; split points removed."""
+    text = normalize_text(title)
+    spans: list[tuple[int, int]] = []
+    for start, end in sorted({m.span() for p in _CLAUSE_DELIMITERS for m in p.finditer(text)}):
+        if spans and start < spans[-1][1]:
+            spans[-1] = (spans[-1][0], max(end, spans[-1][1]))
+        else:
+            spans.append((start, end))
+    pieces, pos = [], 0
+    for k, (start, end) in enumerate(spans):
+        pieces.append(TitlePiece(k, text[pos:start].strip(), start))
+        pos = end
+    pieces.append(TitlePiece(len(spans), text[pos:].strip(), len(text)))
+    return pieces
+
+
+def title_clauses(title: str | None) -> list[TitlePiece]:
+    """Retained C4 title clauses: pieces with at least one content token."""
+    return [p for p in title_pieces(title) if tokenize(p.text)]
+
+
+def head_clause_position(title: str | None) -> int | None:
+    """C23: position of the retained clause immediately preceding the first
+    cue (R4/C6), or None if there is no cue or that piece is not retained."""
+    cue = find_first_cue(title)
+    if cue is None:
+        return None
+    pieces = title_pieces(title)
+    before = [p for p in pieces if p.end == cue.start]
+    if len(before) != 1:
+        raise ValueError("first cue is not a C4 split point")
+    return before[0].position if tokenize(before[0].text) else None
+
+
+@dataclass(frozen=True)
+class S8Event:
+    """An event after S8. S7-derived events keep their S7 cluster index;
+    container-only events are created by an unmatched title clause."""
+
+    members: tuple[int, ...]       # key-ordered, attached containers included
+    container_only: bool
+    origin: tuple                  # ("s7", cluster index) or ("clause", container, position)
+
+
+@dataclass(frozen=True)
+class QualifiedEvent:
+    """An S7 event meeting the clause-match evidence condition for one unit."""
+
+    event: int                     # index into state.events
+    member: int                    # qualifying member supplying the similarity
+    similarity: float              # highest qualifying member cosine
+    blockers: tuple[Blocker, ...]  # cannot-links against current members (R1, G2)
+
+
+@dataclass(frozen=True)
+class AttachmentUnit:
+    """S8 outcome of one container title clause or suppressed summary sentence."""
+
+    container: int
+    kind: str                      # "title" or "summary"
+    position: int                  # title piece position or summary sentence index
+    status: str                    # "attached", "blocked", "unmatched_container_only"
+                                   # or "unmatched_summary"
+    event: int | None              # attached or created event
+    member: int | None             # qualifying member of the attached event
+    similarity: float | None
+    qualified: tuple[QualifiedEvent, ...]   # evidence-qualified events, by event index
+
+
+@dataclass(frozen=True)
+class HeadEvent:
+    """C23 head-clause provenance for a container with a pending claim."""
+
+    position: int | None           # head clause position, None if there is none
+    event: int | None              # event the head clause resolved to, if any
+
+
+def _units(article: Article, model: CorpusModel):
+    """(kind, position, vector, amount keys) for a container's S8 units.
+
+    Retained title clauses in title order (C4), then suppressed summary
+    sentences with content tokens in sentence order (C3), all vectorized with
+    title weight 1 and the container's own source-common zero weights.
+    """
+    zero = model.common.get(article.source_id, frozenset())
+    for piece in title_clauses(article.title):
+        yield ("title", piece.position, clause_vector(piece.text, article.source_id, model),
+               frozenset(a.key for a in extract_numbers(piece.text)))
+    sentences = split_sentences(article.summary)
+    for k, tokens in enumerate(model.sentence_tokens[article.id]):
+        if not tokens:
+            continue
+        numbers = {t.content for t in token_kinds(sentences[k]) if t.number and t.content}
+        yield ("summary", k, weighted_vector(tokens, [], model.idf, title_weight=1,
+                                             zero_weight=zero),
+               frozenset(numbers & set(tokens)))
+
+
+def apply_container_attachments(state: StageBState) -> None:
+    """S8, recomputed from the S7 clusters on every call.
+
+    Containers are processed in (representative time, normalized_url) order
+    (G2), each unit in title-clause then summary-sentence order. An S7 event is
+    evidence-qualified when a non-container member that is a sealed candidate
+    partner of the container (G6) meets ``clause_matches`` (C3, H3); its similarity
+    is the highest such member cosine. It is eligible unless the container has
+    a cannot-link with a current member, earlier-attached containers included
+    (R1, G2). The best eligible event wins, exact ties going to the smallest
+    sorted current-member key (H2, C24). If qualified events exist but all are
+    blocked, nothing happens (G3). If none qualifies, a title clause creates its
+    own container-only event; a summary sentence creates nothing. Containers
+    never merge events. Replaces ``events``, ``units`` and ``heads``; the S7
+    output, pair states and edges are not modified.
+    """
+    non_containers = {i for i, a in state.articles.items() if not a.container_flag}
+    if set(state.cluster_of) != non_containers:
+        raise ValueError("S7 clustering must be applied before S8")
+    model, articles = state.model, state.articles
+    working = [set(members) for members in state.clusters]
+    origins: list[tuple] = [("s7", n) for n in range(len(state.clusters))]
+    units: list[AttachmentUnit] = []
+    heads: dict[int, HeadEvent] = {}
+
+    def key_of(i: int) -> tuple:
+        return _order_key(articles[i])
+
+    containers = sorted((i for i, a in articles.items() if a.container_flag), key=key_of)
+    for c in containers:
+        resolved: dict[int, int | None] = {}   # title clause position -> event
+        for kind, position, vec, amounts in _units(articles[c], model):
+            qualified = []
+            for n, members in enumerate(state.clusters):
+                matches = [(cosine(vec, state.features[m].vector), m) for m in members
+                          if (min(c, m), max(c, m)) in state.pairs
+                          and clause_matches(vec, amounts, state.features[m].vector,
+                                             model.numbers[m], model.distinctive)]
+                if not matches:
+                    continue
+                similarity, member = min(matches, key=lambda s: (-s[0], key_of(s[1])))
+                blockers = sorted((b for x in working[n] if x != c
+                                   for b in cross_pair_blockers(state, c, x, driving=True)),
+                                  key=lambda b: _blocker_order(state, b))
+                qualified.append(QualifiedEvent(n, member, similarity, tuple(blockers)))
+            eligible = [q for q in qualified if not q.blockers]
+            if eligible:
+                best = min(eligible, key=lambda q: (-q.similarity,
+                                                    sorted(key_of(i) for i in working[q.event])))
+                working[best.event].add(c)
+                unit = AttachmentUnit(c, kind, position, "attached", best.event, best.member,
+                                      best.similarity, tuple(qualified))
+            elif qualified:
+                unit = AttachmentUnit(c, kind, position, "blocked", None, None, None,
+                                      tuple(qualified))
+            elif kind == "title":
+                working.append({c})
+                origins.append(("clause", c, position))
+                unit = AttachmentUnit(c, kind, position, "unmatched_container_only",
+                                      len(working) - 1, None, None, ())
+            else:
+                unit = AttachmentUnit(c, kind, position, "unmatched_summary", None, None, None,
+                                      ())
+            units.append(unit)
+            if kind == "title":
+                resolved[position] = unit.event
+        if c in state.pending:
+            head = head_clause_position(articles[c].title)
+            heads[c] = HeadEvent(head, None if head is None else resolved[head])
+
+    state.events = tuple(S8Event(tuple(sorted(members, key=key_of)), origin[0] == "clause",
+                                 origin)
+                         for members, origin in zip(working, origins))
+    state.units = tuple(units)
+    state.heads = heads
