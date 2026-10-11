@@ -1004,6 +1004,49 @@ existing literal cue matching, not from observed Stage B performance:
   unchanged: every container membership has role `reports`, whatever other
   role evidence the container carries.
 
+Pre-implementation clarification, discovered during the read-only S10
+boundary mapping after S9 was implemented and pushed (checkpoint
+`1f66a90881eb3f0dac3cd60c5cabfdf23c3c28af`) and before any S10 code, real
+Stage B prediction or gold evaluation. C26 fixes the order and scope of the
+frozen section 9 checks for deterministic implementation; it was not chosen
+from observed Stage B performance and adds no threshold, cue or heuristic:
+
+- **C26 — S10 mapping order and suppression scope.** Each retained S5 pending
+  claim is mapped as follows.
+  1. *Head event.* The head event is the C5/C23 head event: the cue article's
+     own event for a non-container, or the event its C23 head clause resolved
+     to for a container. A container-only event created by that clause is a
+     valid head event. A claim with no head event emits nothing.
+  2. *Antecedent event.* The distinct events of the claim's valid antecedent
+     articles are collected. If there is not exactly one, the claim abstains,
+     and no event-level suppression check below is applied to it. Because
+     antecedent articles are non-containers (R2), the resolved antecedent event
+     is never a container-only event; the frozen drop of container-only
+     antecedents is retained as a defensive check.
+  3. *Event-level timing.* The frozen section 9 requirement is retained
+     unchanged: the resolved antecedent event must have a member whose
+     representative time is not later than the cue article's. No other timing
+     test is added.
+  4. *Self-loop and same-event suppression.* Both are evaluated against the
+     designated head event only. A self-loop is a head event equal to the
+     resolved antecedent event. Endpoints ended up in the same event when an
+     antecedent article is a member of the head event. A container cue
+     article's other event memberships are not consulted, so neither check
+     can override the C23 head event. Because each antecedent article belongs
+     to exactly one event, the two checks coincide; under R1 and G2 neither
+     can occur, and both are retained as defensive drops.
+  5. *Deduplication and mutual claims.* The surviving claims are directed
+     `(head event, antecedent event)` claims. They are deduplicated by
+     `(source event, target event, type, basis)` under G5, keeping all cue
+     provenance in G5 order. If the deduplicated claims contain both
+     directions between the same two events, neither relation is emitted
+     (C19); the provenance of both is retained.
+
+  Abstained, dropped and mutual claims are recorded as provenance, not as
+  relations. Cue vocabulary, antecedent matching, T1, G4, the candidate
+  boundary and the cannot-link rules are unchanged; `part_of` remains disabled
+  and only `publisher_stated` relations are emitted.
+
 **Provenance.** The Stage B prediction artifact records the frozen corpus,
 candidate-artifact and Stage A configuration identities and a Stage B
 specification/configuration hash. It does not need to contain the commit hash
