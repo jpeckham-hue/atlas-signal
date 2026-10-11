@@ -33,7 +33,6 @@ Continue Experiment 002 Stage B in the frozen sequence. As of the latest verifie
 ## Current blockers / intentional deferrals
 
 - S9-S11 are not implemented yet; do not report Stage B as complete.
-- The S8 invariant that a container attached to the same event more than once yields one membership while retaining per-unit provenance has no dedicated regression test yet.
 - Real Stage B execution/scoring must follow the experiment's frozen process and leakage constraints; implementation commits explicitly avoid treating synthetic tests as real evaluation.
 - Story/Thread grouping remains outside the Experiment 002 model.
 - Embeddings, LLM classification, article-page fetching, and production-schema changes are outside Experiment 002's frozen scope.
@@ -43,7 +42,9 @@ Continue Experiment 002 Stage B in the frozen sequence. As of the latest verifie
 
 `5dd4f8086d1bfc27df2e44b9ea87d299621022be` (2026-10-11) implements Experiment 002 Stage B S8 container attachment to the S7 events. The commit explicitly states that S9-S11 remain unimplemented. It added 32 synthetic tests; at that commit the focused Stage B/leakage run passed 153 tests and the full suite passed 594 tests (1 skipped), and all 25 S8 mutation checks were caught.
 
-It follows the specification clarification `a53ceb29547b521f382857cfec5f44154ebd593f` (2026-10-07), which froze C23-C24 (S8 head clause and tie-break) before S8 implementation, and `b0ff0f01591a0804331c6ef3d2d9d08fccc92aa4` (2026-10-07), which implemented S7 constrained clustering over the S5/S6 edges.
+`9d70d6e2fbbdc0d00e870a54241da4579dfbd6e3` (2026-10-11) adds a dedicated synthetic regression test for the S8 invariant that a container attached to the same event by two distinct units yields one membership while retaining both unit records. With it, the focused Stage B/leakage run passes 154 tests and the full suite passes 595 tests (1 skipped).
+
+S8 follows the specification clarification `a53ceb29547b521f382857cfec5f44154ebd593f` (2026-10-07), which froze C23-C24 (S8 head clause and tie-break) before S8 implementation, and `b0ff0f01591a0804331c6ef3d2d9d08fccc92aa4` (2026-10-07), which implemented S7 constrained clustering over the S5/S6 edges.
 
 Earlier, `eabce623b87cba6c96f28dff93b25dca8b6955e1` (2026-10-07) implemented S6 same-event decisions over sealed candidate pairs, and the specification clarification `91f3e046d3a0c513e2e525af73f37ac0968f06e5` froze C20-C22 before S6/S7 implementation.
 
