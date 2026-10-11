@@ -2084,6 +2084,40 @@ class AttachmentTests(AttachFixture):
         self.assertNotEqual(self.event_of(s, "q"), self.event_of(s, "h"))
         self.assertEqual(len(s.events), len(s.clusters))
 
+    def test_two_units_attaching_to_one_event_give_one_membership(self):
+        specs = {"k": spec("Quarry flooding halts output; granite site output halted by quarry "
+                           "flooding", 9, path="live"),
+                 "q": spec(QUARRY), "h": spec(HARBOUR)}
+        s7 = self.world(specs, pairs=[("k", "q")], s8=False)
+        s = self.world(specs, pairs=[("k", "q")])
+        k, q = self.id["k"], self.id["q"]
+        self.assertIn((min(k, q), max(k, q)), s.pairs)                       # G6 for both units
+        event = self.event_of(s, "q")
+        units = [self.unit(s, "k", "title", 0), self.unit(s, "k", "title", 1)]
+        texts = ["quarry flooding halts output", "granite site output halted by quarry flooding"]
+        for u, text in zip(units, texts):
+            with self.subTest(position=u.position):
+                vec = sb.clause_vector(text, "pub-a", s.model)
+                self.assertTrue(sb.clause_matches(vec, frozenset(), s.features[q].vector,
+                                                  s.model.numbers[q], s.model.distinctive))
+                self.assertEqual((u.status, u.event, u.member, u.similarity),
+                                 ("attached", event, q, cand.cosine(vec, s.features[q].vector)))
+                self.assertEqual([(qe.event, qe.member, qe.blockers) for qe in u.qualified],
+                                 [(event, q, ())])
+        self.assertEqual(self.units(s), [("k", "title", 0, "attached", ("s7", ("q",)), "q"),
+                                         ("k", "title", 1, "attached", ("s7", ("q",)), "q")])
+        self.assertEqual(s.events[event].members.count(k), 1)
+        self.assertEqual(self.members(s, event), ("k", "q"))
+        self.assertEqual([self.members(s, n) for n, e in enumerate(s.events) if k in e.members],
+                         [("k", "q")])
+        self.assertEqual(self.container_only(s), [])
+        self.assertEqual(len(s.events), len(s.clusters))
+        self.assertEqual((s.clusters, s.cluster_of), (s7.clusters, s7.cluster_of))
+        result = (s.events, s.units, dict(s.heads))
+        sb.apply_container_attachments(s)
+        self.assertEqual((s.events, s.units, s.heads), result)
+        self.assertEqual((s.clusters, s.cluster_of), (s7.clusters, s7.cluster_of))
+
     def test_branch_a_below_cosine_threshold(self):
         specs = {"k": spec("Harbour £7m", 9, path="live"),
                  "q": spec("Harbour fund of £7m set as granite crews wait for spring rains",
