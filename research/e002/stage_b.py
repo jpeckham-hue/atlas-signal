@@ -3,12 +3,12 @@
 Implemented so far: loading and integrity validation of the sealed Stage A
 candidate artifact, candidate pair state, S5 steps 1-5 (`copy_of`,
 template slot conflict, companion documents, advisory match, `follows_from`
-cue), S6 same-event decisions, S7 constrained clustering and S8 container
-attachment. S9-S11 are not implemented yet.
+cue), S6 same-event decisions, S7 constrained clustering, S8 container
+attachment and S9 membership roles. S10-S11 are not implemented yet.
 
 Specification: docs/experiments/002-event-relationship-baseline.md, sections
 5-12 and the Stage B pre-implementation clarifications (C1-C15, R1-R5,
-G1-G6, H1-H3, T1, C16-C24). Stage B is candidate-bounded (C1): only pairs in
+G1-G6, H1-H3, T1, C16-C25). Stage B is candidate-bounded (C1): only pairs in
 the sealed Stage A candidate artifact receive decisions.
 """
 
@@ -33,6 +33,7 @@ from .text import (
     extract_numbers,
     jaccard,
     normalize_text,
+    raw_tokens,
     split_sentences,
     token_kinds,
     tokenize,
@@ -110,6 +111,8 @@ class StageBState:
     events: tuple["S8Event", ...] = ()             # S7-derived first, by cluster index
     units: tuple["AttachmentUnit", ...] = ()       # in processing order
     heads: dict[int, "HeadEvent"] = field(default_factory=dict)  # by container cue article
+    # S9 output, replaced on every apply_membership_roles call and cleared by S8.
+    roles: tuple["MembershipRole", ...] = ()      # by event index, then event member order
 
     def __post_init__(self):
         self.articles: dict[int, Article] = {a.id: a for a in self.corpus.articles}
@@ -954,8 +957,9 @@ def apply_container_attachments(state: StageBState) -> None:
     sorted current-member key (H2, C24). If qualified events exist but all are
     blocked, nothing happens (G3). If none qualifies, a title clause creates its
     own container-only event; a summary sentence creates nothing. Containers
-    never merge events. Replaces ``events``, ``units`` and ``heads``; the S7
-    output, pair states and edges are not modified.
+    never merge events. Replaces ``events``, ``units`` and ``heads`` and clears
+    the S9 ``roles``, which depend on the events; the S7 output, pair states and
+    edges are not modified.
     """
     non_containers = {i for i, a in state.articles.items() if not a.container_flag}
     if set(state.cluster_of) != non_containers:
@@ -1016,3 +1020,75 @@ def apply_container_attachments(state: StageBState) -> None:
                          for members, origin in zip(working, origins))
     state.units = tuple(units)
     state.heads = heads
+    state.roles = ()
+
+
+# --- S9: membership roles ----------------------------------------------------------
+
+# Section 8 role cues, matched as frozen (C13, C25).
+ANNOUNCEMENT_CUES = ("to make an announcement", "to announce")
+_ANNOUNCEMENT_PATTERNS = [
+    re.compile(r"(?<![^\W_])" + r"\s+".join(re.escape(w) for w in cue.split()) + r"(?![^\W_])")
+    for cue in ANNOUNCEMENT_CUES
+]
+EXPLAINER_WORDS = frozenset({"why", "how", "what"})
+DISCUSSES_FORMATS = frozenset({"audio", "video", "opinion", "programme"})
+DISCUSSES_DOCUMENT_TYPES = frozenset({"backgrounders"})
+
+
+@dataclass(frozen=True)
+class MembershipRole:
+    """S9 role of one event membership and the role rule that assigned it."""
+
+    event: int                     # index into state.events
+    article: int
+    role: str                      # "anticipates", "discusses" or "reports"
+    rule: str                      # "container", "advisory_document_type",
+                                   # "announcement_title", "discusses_format",
+                                   # "backgrounder_document_type", "explainer_title"
+                                   # or "default"
+
+
+def membership_role(article: Article) -> tuple[str, str]:
+    """(role, rule) for any membership of ``article`` (section 8).
+
+    Every container membership is ``reports`` (R5). Otherwise the C13
+    precedence applies: ``anticipates`` (media advisory document type, or a
+    whole-token announcement phrase anywhere in the normalized title, C25), then
+    ``discusses`` (audio, video, opinion or programme format class, backgrounder
+    document type, or a first title word token of why/how/what, C25), then
+    ``reports``. Depends only on the article itself.
+    """
+    if article.container_flag:
+        return ("reports", "container")
+    if article.document_type == ADVISORY_TYPE:
+        return ("anticipates", "advisory_document_type")
+    title = normalize_text(article.title)
+    if any(p.search(title) for p in _ANNOUNCEMENT_PATTERNS):
+        return ("anticipates", "announcement_title")
+    if article.format_class in DISCUSSES_FORMATS:
+        return ("discusses", "discusses_format")
+    if article.document_type in DISCUSSES_DOCUMENT_TYPES:
+        return ("discusses", "backgrounder_document_type")
+    words = raw_tokens(article.title)
+    if words and words[0] in EXPLAINER_WORDS:
+        return ("discusses", "explainer_title")
+    return ("reports", "default")
+
+
+def apply_membership_roles(state: StageBState) -> None:
+    """S9, recomputed from the S8 events on every call.
+
+    One role per event membership, in event index order and then each event's
+    member order; a container gets one ``reports`` record per event it belongs
+    to and none if it belongs to no event. Replaces ``roles``; events, units,
+    heads, the S7 output, pair states and edges are not modified.
+    """
+    if (set(state.cluster_of) != {i for i, a in state.articles.items() if not a.container_flag}
+            or len(state.events) < len(state.clusters)
+            or any(state.events[n].origin != ("s7", n)
+                   or not set(members) <= set(state.events[n].members)
+                   for n, members in enumerate(state.clusters))):
+        raise ValueError("S8 container attachment must be applied before S9")
+    state.roles = tuple(MembershipRole(n, i, *membership_role(state.articles[i]))
+                        for n, event in enumerate(state.events) for i in event.members)

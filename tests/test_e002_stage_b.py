@@ -2256,5 +2256,241 @@ class AttachmentDeterminismTests(AttachFixture):
             sb.apply_container_attachments(s)
 
 
+# --- S9: membership roles --------------------------------------------------------------
+
+READOUT, STATEMENT = "readouts", "statements"
+PLAIN = "Harbour crews return to the eastern docks"
+
+
+class MembershipRoleRuleTests(Fixture):
+    """Role of a single membership; article fields varied directly."""
+
+    def setUp(self):
+        super().setUp()
+        self.base = self.articles([article(1, title=PLAIN)])[0][1]
+
+    def role(self, title=PLAIN, document_type=None, format_class="standard", container=False):
+        return sb.membership_role(dataclasses.replace(
+            self.base, title=title, document_type=document_type, format_class=format_class,
+            container_flag=container))
+
+    def test_anticipates_routes(self):
+        self.assertEqual(self.role(document_type=ADV), ("anticipates", "advisory_document_type"))
+        for title in ("Minister to announce harbour funding",
+                      "Council to make an announcement on the harbour",
+                      "To announce: harbour funding",
+                      "Harbour funding: minister TO  ANNOUNCE today",
+                      "Minister to announce harbour funding",
+                      "Harbour levy (to announce)",
+                      "Harbour crews return; council to announce"):
+            with self.subTest(title=title):
+                self.assertEqual(self.role(title), ("anticipates", "announcement_title"))
+
+    def test_announcement_phrase_near_misses(self):
+        for title in ("Minister announces harbour funding",
+                      "Harbour announcement due",
+                      "Minister will announce harbour funding",
+                      "Council to make announcement on the harbour",
+                      "Council to make an important announcement",
+                      "Radio to announcer post",
+                      "Results to announced later",
+                      "Plan to-announce harbour funding",
+                      "Auto announce harbour funding"):
+            with self.subTest(title=title):
+                self.assertEqual(self.role(title), ("reports", "default"))
+
+    def test_discusses_routes(self):
+        for fmt in ("audio", "video", "opinion", "programme"):
+            with self.subTest(format_class=fmt):
+                self.assertEqual(self.role(format_class=fmt), ("discusses", "discusses_format"))
+        self.assertEqual(self.role(document_type=BKG),
+                         ("discusses", "backgrounder_document_type"))
+        for title in ("Why harbour crews struck", "How the harbour reopened",
+                      "What the harbour vote means", "What's next for the harbour",
+                      "“Why” harbour crews struck", "... how harbour crews struck",
+                      "WHY harbour crews struck"):
+            with self.subTest(title=title):
+                self.assertEqual(self.role(title), ("discusses", "explainer_title"))
+
+    def test_explainer_near_misses(self):
+        for title in ("Here is why harbour crews struck", "However, the harbour reopened",
+                      "Whatever happens at the harbour", "When the harbour reopens",
+                      "Who runs the harbour", "Whys and wherefores of the harbour",
+                      "10 ways how the harbour reopened", ""):
+            with self.subTest(title=title):
+                self.assertEqual(self.role(title), ("reports", "default"))
+
+    def test_reports_default(self):
+        for document_type in (None, REL, READOUT, STATEMENT, "factsheet", "factsheets"):
+            for fmt in ("standard", "live"):
+                with self.subTest(document_type=document_type, format_class=fmt):
+                    self.assertEqual(self.role(document_type=document_type, format_class=fmt),
+                                     ("reports", "default"))
+        self.assertEqual(self.role("Harbour factsheet"), ("reports", "default"))
+
+    def test_precedence(self):
+        self.assertEqual(self.role("Why harbour crews struck", document_type=ADV),
+                         ("anticipates", "advisory_document_type"))
+        self.assertEqual(self.role("Minister to announce harbour funding", document_type=BKG),
+                         ("anticipates", "announcement_title"))
+        self.assertEqual(self.role("Minister to announce harbour funding", format_class="opinion"),
+                         ("anticipates", "announcement_title"))
+        self.assertEqual(self.role("How harbour crews struck", format_class="opinion"),
+                         ("discusses", "discusses_format"))
+        self.assertEqual(self.role("How harbour crews struck", document_type=BKG),
+                         ("discusses", "backgrounder_document_type"))
+
+    def test_container_membership_is_always_reports(self):
+        for kw in (dict(document_type=ADV), dict(title="Minister to announce harbour funding"),
+                   dict(format_class="programme"), dict(format_class="opinion"),
+                   dict(document_type=BKG), dict(title="Why harbour crews struck"), {}):
+            with self.subTest(**kw):
+                self.assertEqual(self.role(container=True, **kw), ("reports", "container"))
+
+    def test_corpus_typing(self):
+        def web(i, path, title=PLAIN):
+            return article(i, url=f"https://example.test/{path}/a{i}", title=title)
+        rows = [gov(1, "u", ADV, "Media advisory on harbour", "Harbour crews return."),
+                gov(2, "u", BKG, "Harbour levy details", "Harbour crews return."),
+                gov(3, "u", REL, "Minister to announce harbour levy", "Harbour crews return."),
+                gov(4, "u", REL, "Harbour levy approved", "Harbour crews return."),
+                article(5, source="gov-b", url="https://www.canada.ca/en/u/news/both.html",
+                        title="Harbour levy approved again", sightings=((None, [ADV, REL]),)),
+                web(6, "opinion"), web(7, "video"), web(8, "audio"), web(9, "news"),
+                web(10, "news", "How the harbour reopened"), web(11, "live"), web(12, "sounds"),
+                *fillers(100)]
+        arts = self.articles(rows)[0]
+        self.assertEqual({i: sb.membership_role(arts[i]) for i in range(1, 13)}, {
+            1: ("anticipates", "advisory_document_type"),
+            2: ("discusses", "backgrounder_document_type"),
+            3: ("anticipates", "announcement_title"),
+            4: ("reports", "default"),
+            5: ("reports", "default"),             # several document types: none
+            6: ("discusses", "discusses_format"),
+            7: ("discusses", "discusses_format"),
+            8: ("discusses", "discusses_format"),
+            9: ("reports", "default"),
+            10: ("discusses", "explainer_title"),
+            11: ("reports", "container"),
+            12: ("reports", "container")})
+        self.assertEqual((arts[12].format_class, arts[12].container_flag), ("programme", True))
+
+
+class MembershipRoleTests(AttachFixture):
+    # k is a programme-format container with an explainer title; it attaches to
+    # q's and h's events and creates one container-only event.
+    SPECS = {"k": spec("Why quarry flooding halts output; harbour strike widens; walrus yonder",
+                       9, path="sounds"),
+             "q": spec(QUARRY, path="opinion"),
+             "h": spec(HARBOUR, 13),
+             "a": spec("Port council to announce dock levy", 14)}
+    PAIRS = [("k", "q"), ("k", "h")]
+
+    def run_world(self, ids=None, shuffle=None):
+        s = self.world(self.SPECS, self.PAIRS, ids=ids, s8=False)
+        if shuffle is not None:
+            random.Random(shuffle).shuffle(s.edges)
+            sb.apply_clustering(s)
+        sb.apply_container_attachments(s)
+        sb.apply_membership_roles(s)
+        return s
+
+    def named(self, s):
+        return [(self.ev(s, r.event), self.name(r.article), r.role, r.rule) for r in s.roles
+                if r.article in self.slug]
+
+    def test_roles_per_membership(self):
+        s = self.run_world()
+        k = s.articles[self.id["k"]]
+        self.assertEqual((k.format_class, k.container_flag), ("programme", True))
+        self.assertEqual([u[3] for u in self.units(s)],
+                         ["attached", "attached", "unmatched_container_only"])
+        self.assertEqual(sorted(self.named(s)), sorted([
+            (("s7", ("q",)), "k", "reports", "container"),
+            (("s7", ("q",)), "q", "discusses", "discusses_format"),
+            (("s7", ("h",)), "k", "reports", "container"),
+            (("s7", ("h",)), "h", "reports", "default"),
+            (("clause", "k", 2), "k", "reports", "container"),
+            (("s7", ("a",)), "a", "anticipates", "announcement_title")]))
+
+    def test_one_record_per_membership_in_event_order(self):
+        s = self.run_world()
+        self.assertEqual([(r.event, r.article) for r in s.roles],
+                         [(n, i) for n, e in enumerate(s.events) for i in e.members])
+        self.assertEqual([r.role for r in s.roles if r.article == self.id["k"]], ["reports"] * 3)
+        for r in s.roles:
+            self.assertEqual((r.role, r.rule), sb.membership_role(s.articles[r.article]))
+
+    def test_unattached_container_has_no_role(self):
+        s = self.world({"k": spec("Quarry flooding halts output", 9, path="live"),
+                        "q": spec(QUARRY), "s": spec("Quarry crews rest", 13)},
+                       pairs=[("k", "q"), ("k", "s", "follows_from"), ("q", "s")],
+                       edges=[("same_event", "q", "s")])
+        sb.apply_membership_roles(s)
+        self.assertEqual(self.unit(s, "k", "title", 0).status, "blocked")
+        self.assertNotIn(self.id["k"], [r.article for r in s.roles])
+        self.assertEqual(len(s.roles), sum(len(e.members) for e in s.events))
+
+    def test_article_id_permutation(self):
+        first = self.named(self.run_world())
+        self.assertEqual(first, self.named(self.run_world(ids=(4, 1, 3, 2))))
+
+    def test_incoming_edge_order(self):
+        self.assertEqual(self.named(self.run_world(shuffle=3)), self.named(self.run_world()))
+
+    def test_rerun_idempotent_and_inputs_unchanged(self):
+        s = self.run_world()
+        before = (copy.deepcopy(s.pairs), list(s.edges), dict(s.pending), s.clusters,
+                  dict(s.cluster_of), s.edge_dispositions, s.events, s.units, dict(s.heads))
+        roles = s.roles
+        sb.apply_membership_roles(s)
+        self.assertEqual(s.roles, roles)
+        self.assertEqual((s.pairs, s.edges, s.pending, s.clusters, s.cluster_of,
+                          s.edge_dispositions, s.events, s.units, s.heads), before)
+
+    def state_through_s8(self, s):
+        return (copy.deepcopy(s.pairs), list(s.edges), dict(s.pending), s.clusters,
+                dict(s.cluster_of), s.edge_dispositions, s.events, s.units, dict(s.heads))
+
+    def test_s8_rerun_invalidates_roles(self):
+        s = self.run_world()
+        roles = s.roles
+        self.assertEqual(len(roles), sum(len(e.members) for e in s.events))
+        self.assertTrue(roles)
+        before = self.state_through_s8(s)
+        sb.apply_container_attachments(s)
+        self.assertEqual(s.roles, ())
+        self.assertEqual(self.state_through_s8(s), before)    # same inputs, same S8 output
+        sb.apply_membership_roles(s)
+        self.assertEqual(s.roles, roles)
+
+    def test_no_stale_roles_after_membership_change(self):
+        s = self.run_world()
+        old = self.named(s)
+        self.assertIn((("s7", ("h",)), "k", "reports", "container"), old)
+        k, h = self.id["k"], self.id["h"]
+        del s.pairs[(min(k, h), max(k, h))]                 # k loses its G6 partner h
+        sb.apply_container_attachments(s)
+        self.assertEqual(s.roles, ())
+        self.assertEqual(self.unit(s, "k", "title", 1).status, "unmatched_container_only")
+        sb.apply_membership_roles(s)
+        new = self.named(s)
+        self.assertNotIn((("s7", ("h",)), "k", "reports", "container"), new)
+        self.assertIn((("clause", "k", 1), "k", "reports", "container"), new)
+        self.assertEqual([(r.event, r.article) for r in s.roles],
+                         [(n, i) for n, e in enumerate(s.events) for i in e.members])
+        fresh = self.world(self.SPECS, [("k", "q")])
+        sb.apply_membership_roles(fresh)
+        self.assertEqual(new, self.named(fresh))
+
+    def test_s8_required(self):
+        s = self.world(self.SPECS, self.PAIRS, s8=False)
+        with self.assertRaises(ValueError):
+            sb.apply_membership_roles(s)
+        s.cluster_of = {}
+        with self.assertRaises(ValueError):
+            sb.apply_membership_roles(s)
+
+
 if __name__ == "__main__":
     unittest.main()
